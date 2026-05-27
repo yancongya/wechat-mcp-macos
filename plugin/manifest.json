@@ -1,0 +1,89 @@
+{
+  "manifestVersion": 1,
+  "id": "wechat-mcp",
+  "name": "WeChat MCP",
+  "version": "0.2.0",
+  "description": "微信本地数据读取。解密数据库读取消息、搜索、群聊列表。支持语音转文字和每日总结。",
+  "minAppVersion": "0.171.3",
+  "trust": "restricted",
+  "contributes": {
+    "page": {
+      "title": {
+        "zh": "微信 MCP",
+        "en": "WeChat MCP"
+      },
+      "route": "/wechat-mcp",
+      "icon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M8.5 14.5c3.038 0 5.5-2.015 5.5-4.5S11.538 5.5 8.5 5.5 3 7.515 3 10s2.462 4.5 5.5 4.5z\"/><path d=\"M15.5 12.5c2.485 0 4.5-1.573 4.5-3.5S17.985 5.5 15.5 5.5 11 7.073 11 9s2.015 3.5 4.5 3.5z\"/><path d=\"M3 18.5c0-2 2.5-3.5 5.5-3.5M11 18.5c0-2 2.015-3.5 4.5-3.5\"/></svg>"
+    },
+    "tools": [
+      {
+        "name": "wechat_status",
+        "description": "检查微信 MCP Server 状态",
+        "script": "tools/status.js"
+      },
+      {
+        "name": "wechat_read",
+        "description": "读取微信聊天记录。支持按发送者/时间筛选，分组显示。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "chat": {
+              "type": "string",
+              "description": "群聊/联系人名称或 wxid"
+            },
+            "limit": {
+              "type": "number",
+              "description": "返回消息数量，默认 20"
+            },
+            "hours": {
+              "type": "number",
+              "description": "读取最近 N 小时，默认 24"
+            },
+            "sender": {
+              "type": "string",
+              "description": "只看指定发送者"
+            },
+            "format": {
+              "type": "string",
+              "description": "plain/grouped"
+            }
+          },
+          "required": ["chat"]
+        },
+        "script": "tools/read.js"
+      },
+      {
+        "name": "wechat_search",
+        "description": "搜索微信聊天记录。支持按发送者/时间分组。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "keyword": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "chat": {
+              "type": "string",
+              "description": "限定搜索范围"
+            },
+            "hours": {
+              "type": "number",
+              "description": "搜索最近 N 小时，默认 24"
+            },
+            "group_by": {
+              "type": "string",
+              "description": "sender/time/none"
+            }
+          },
+          "required": ["keyword"]
+        },
+        "script": "tools/search.js"
+      },
+      {
+        "name": "wechat_groups",
+        "description": "列出所有微信群聊",
+        "script": "tools/groups.js"
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+zstandard
+pycryptodome
+pilk
+faster-whisper
+mcp[cli]

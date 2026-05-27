@@ -1,0 +1,20 @@
+# 敏感数据
+key.txt
+wechat_keys.json
+contacts.json
+all_keys.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 解密缓存
+decrypted/
+
+# 系统
+.DS_Store
+*.log
+
+# 配置（本地生成）
+config.json

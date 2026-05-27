@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>微信 MCP</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; color: #333; }
+    h1 { font-size: 18px; margin-bottom: 16px; }
+    .status-card { background: #f5f5f7; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .status-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e5e5e5; }
+    .status-row:last-child { border-bottom: none; }
+    .status-label { color: #666; }
+    .status-ok { color: #34c759; font-weight: 500; }
+    .status-fail { color: #ff3b30; font-weight: 500; }
+    .status-warn { color: #ff9500; font-weight: 500; }
+    .btn { background: #007aff; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+    .btn:hover { background: #0066cc; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .actions { margin-top: 16px; display: flex; gap: 8px; }
+    #result { margin-top: 16px; padding: 12px; background: #f0f0f0; border-radius: 8px; white-space: pre-wrap; font-size: 13px; display: none; }
+  </style>
+</head>
+<body>
+  <h1>📱 微信 MCP Server</h1>
+  
+  <div class="status-card" id="status">
+    <div class="status-row">
+      <span class="status-label">加载中...</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" onclick="refreshStatus()">刷新状态</button>
+    <button class="btn" onclick="testRead()">测试读取</button>
+  </div>
+
+  <div id="result"></div>
+
+  <script>
+    async function refreshStatus() {
+      const el = document.getElementById('status');
+      el.innerHTML = '<div class="status-row"><span class="status-label">检查中...</span></div>';
+      
+      try {
+        const resp = await fetch('/api/wechat-mcp/status');
+        const data = await resp.json();
+        el.innerHTML = data.lines.map(line => {
+          const cls = line.includes('✅') ? 'status-ok' : line.includes('❌') ? 'status-fail' : 'status-warn';
+          return `<div class="status-row"><span>${line}</span></div>`;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = `<div class="status-row"><span class="status-fail">获取状态失败: ${e.message}</span></div>`;
+      }
+    }
+
+    async function testRead() {
+      const result = document.getElementById('result');
+      result.style.display = 'block';
+      result.textContent = '读取中...';
+      
+      try {
+        const resp = await fetch('/api/wechat-mcp/test-read');
+        const data = await resp.json();
+        result.textContent = data.output || '无结果';
+      } catch (e) {
+        result.textContent = `测试失败: ${e.message}`;
+      }
+    }
+
+    refreshStatus();
+  </script>
+</body>
+</html>
