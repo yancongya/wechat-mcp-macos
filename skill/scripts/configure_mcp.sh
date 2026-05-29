@@ -2,7 +2,8 @@
 # MCP Server 配置（幂等）
 set -e
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
+VENV_DIR="$PROJECT_DIR/backend/.venv"
 MCP_DIR="$HOME/.wechat-mcp"
 
 echo "=== MCP Server 配置 ==="
@@ -57,7 +58,7 @@ print('✅ config.json 已生成')
 fi
 
 # 3. 补丁 sender.py
-sender_py=$(ls "$PROJECT_DIR/.venv/lib/python3.*/site-packages/wechat_mcp_macos/sender.py" 2>/dev/null | head -1)
+sender_py=$(ls "$VENV_DIR/lib/python3.*/site-packages/wechat_mcp_macos/sender.py" 2>/dev/null | head -1)
 if [ -n "$sender_py" ]; then
     if grep -q 're.findall' "$sender_py" 2>/dev/null; then
         echo "⏭️  sender.py 已补丁，跳过"

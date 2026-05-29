@@ -44,7 +44,7 @@ WATCHED_GROUPS = [
 ]
 
 CONTACTS_FILE = PROJECT_DIR / "contacts.json"
-VENV_PYTHON = PROJECT_DIR / ".venv" / "bin" / "python"
+VENV_PYTHON = PROJECT_DIR / "backend" / ".venv" / "bin" / "python"
 
 # ── 数据加载 ──
 
@@ -735,7 +735,7 @@ def send_to_wechat(text, chat_name):
     if resolved:
         chat_name = resolved
 
-    site_packages = str(PROJECT_DIR / ".venv" / "lib" / "python3.14" / "site-packages")
+    site_packages = str(PROJECT_DIR / "backend" / ".venv" / "lib" / "python3.14" / "site-packages")
     escaped_text = text.replace("\\", "\\\\").replace('"', '\\"')
     escaped_chat = chat_name.replace("\\", "\\\\").replace('"', '\\"')
 

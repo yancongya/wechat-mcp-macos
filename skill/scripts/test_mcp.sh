@@ -2,12 +2,13 @@
 # 功能测试（幂等）
 set -e
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
+VENV_PYTHON="$PROJECT_DIR/backend/.venv/bin/python"
 
 echo "=== 功能测试 ==="
 
 cd "$PROJECT_DIR"
-source .venv/bin/activate
+source "$PROJECT_DIR/backend/.venv/bin/activate"
 
 # 测试 1: 读取功能
 echo "── 测试 1: 读取消息 ──"

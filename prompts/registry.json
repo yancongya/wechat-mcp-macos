@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "comment": "Prompt registry — 按 trigger 匹配 chat/contact 输出不同 prompt",
+
+  "defaults": {
+    "hours": 24,
+    "limit": 200,
+    "output": {
+      "image_style": {
+        "width": 800
+      }
+    }
+  },
+
+  "prompts": [
+    {
+      "id": "langze-daily",
+      "name": "琅泽群每日总结",
+      "description": "琅泽 BL/几何节点群的 AI 总结 + 长图",
+      "trigger": {
+        "type": "group",
+        "chats": [
+          "58299288465@chatroom",
+          "48672694909@chatroom"
+        ]
+      },
+      "input": {
+        "source": "pipeline",
+        "pipeline_args": {
+          "hours": 24,
+          "voice_engine": "whisper"
+        }
+      },
+      "process": {
+        "mode": "llm",
+        "template_file": "langze-summary.txt"
+      },
+      "output": {
+        "text": true,
+        "image": true
+      }
+    },
+
+    {
+      "id": "any-group-stats",
+      "name": "任意群数据统计",
+      "description": "未匹配到特定 prompt 的群聊，回退纯规则统计",
+      "trigger": {
+        "type": "group",
+        "chats": []
+      },
+      "input": {
+        "source": "pipeline",
+        "pipeline_args": {
+          "hours": 24
+        }
+      },
+      "process": {
+        "mode": "rule"
+      },
+      "output": {
+        "text": true,
+        "json": true,
+        "image": false
+      }
+    },
+
+    {
+      "id": "any-contact-stats",
+      "name": "任意私聊数据统计",
+      "description": "未匹配到特定 prompt 的私聊，回退纯规则统计",
+      "trigger": {
+        "type": "contact",
+        "contacts": []
+      },
+      "input": {
+        "source": "pipeline",
+        "pipeline_args": {
+          "hours": 24
+        }
+      },
+      "process": {
+        "mode": "rule"
+      },
+      "output": {
+        "text": true,
+        "json": true,
+        "image": false
+      }
+    },
+
+    {
+      "id": "default",
+      "name": "兜底处理",
+      "description": "无法识别 chat 类型时的最后兜底",
+      "trigger": {
+        "type": "catchall"
+      },
+      "input": {
+        "source": "raw",
+        "pipeline_args": {
+          "hours": 24
+        }
+      },
+      "process": {
+        "mode": "rule"
+      },
+      "output": {
+        "text": true,
+        "image": false
+      }
+    }
+  ]
+}

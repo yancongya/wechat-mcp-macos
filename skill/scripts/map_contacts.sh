@@ -2,7 +2,8 @@
 # 联系人映射（幂等）
 set -e
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
+VENV_PYTHON="$PROJECT_DIR/backend/.venv/bin/python"
 
 echo "=== 联系人映射 ==="
 
@@ -39,7 +40,7 @@ echo "🔍 从 contact.db 提取联系人映射..."
 
 # 使用 Python 提取
 cd "$PROJECT_DIR"
-"$PROJECT_DIR/.venv/bin/python" -c "
+"$VENV_PYTHON" -c "
 import sys, json, subprocess, csv, io, os, hashlib, glob
 
 # Load keys

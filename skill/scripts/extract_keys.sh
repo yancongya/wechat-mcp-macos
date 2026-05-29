@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
 LLVM_DIR=$(ls -d /opt/homebrew/Cellar/llvm/*/libexec/python3.* 2>/dev/null | sort -V | tail -1)
 
 echo "=== 密钥提取 ==="

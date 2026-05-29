@@ -2,7 +2,8 @@
 # 部署项目（幂等）
 set -e
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
+VENV_DIR="$PROJECT_DIR/backend/.venv"
 
 echo "=== 部署项目 ==="
 
@@ -10,35 +11,26 @@ echo "=== 部署项目 ==="
 if [ -d "$PROJECT_DIR/.git" ]; then
     echo "⏭️  项目已克隆，跳过"
 else
-    echo "📦 克隆 wechat-decrypt-macos..."
+    echo "📦 克隆 wechat-mcp-macos..."
     cd "$HOME/Desktop/OH-WorkSpace"
-    git clone https://github.com/cocohahaha/wechat-decrypt-macos.git
+    git clone https://github.com/yancongya/wechat-mcp-macos.git
     echo "✅ 项目克隆完成"
 fi
 
 # 2. 创建虚拟环境
-if [ -d "$PROJECT_DIR/.venv" ]; then
+if [ -d "$VENV_DIR" ]; then
     echo "⏭️  虚拟环境已创建，跳过"
 else
     echo "🐍 创建虚拟环境..."
-    cd "$PROJECT_DIR"
-    python3 -m venv .venv
+    mkdir -p "$PROJECT_DIR/backend"
+    python3 -m venv "$VENV_DIR"
     echo "✅ 虚拟环境创建完成"
 fi
 
-# 3. 安装 MCP 依赖
+# 3. 安装 wechat-mcp-macos（PyPI 包：Python 后端）
 cd "$PROJECT_DIR"
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
-if python3 -c "from mcp.server.fastmcp import FastMCP" 2>/dev/null; then
-    echo "⏭️  MCP 依赖已安装，跳过"
-else
-    echo "📦 安装 MCP 依赖..."
-    pip install "mcp[cli]>=1.0.0" --quiet
-    echo "✅ MCP 依赖安装完成"
-fi
-
-# 4. 安装 wechat-mcp-macos
 if python3 -c "import wechat_mcp_macos" 2>/dev/null; then
     echo "⏭️  wechat-mcp-macos 已安装，跳过"
 else
@@ -47,13 +39,13 @@ else
     echo "✅ wechat-mcp-macos 安装完成"
 fi
 
-# 5. 安装 zstandard
-if python3 -c "import zstandard" 2>/dev/null; then
-    echo "⏭️  zstandard 已安装，跳过"
+# 4. 安装项目依赖
+if python3 -c "import zstandard, pycryptodome" 2>/dev/null; then
+    echo "⏭️  项目依赖已安装，跳过"
 else
-    echo "📦 安装 zstandard..."
-    pip install zstandard --quiet
-    echo "✅ zstandard 安装完成"
+    echo "📦 安装项目依赖..."
+    pip install -r "$PROJECT_DIR/requirements.txt" --quiet
+    echo "✅ 项目依赖安装完成"
 fi
 
 echo ""

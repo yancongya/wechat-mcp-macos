@@ -4,7 +4,8 @@
 
 set -o pipefail
 
-PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-decrypt-macos"
+PROJECT_DIR="$HOME/Desktop/OH-WorkSpace/wechat-mcp-macos"
+VENV_DIR="$PROJECT_DIR/backend/.venv"
 MCP_DIR="$HOME/.wechat-mcp"
 WECHAT_APP="/Applications/WeChat.app"
 
@@ -100,29 +101,29 @@ else
     fail "项目未克隆"
 fi
 
-if [ -d "$PROJECT_DIR/.venv" ]; then
+if [ -d "$VENV_DIR" ]; then
     ok "虚拟环境已创建"
 else
     fail "虚拟环境未创建"
 fi
 
-if [ -f "$PROJECT_DIR/.venv/bin/python" ]; then
+if [ -f "$VENV_DIR/bin/python" ]; then
     # 测试 MCP import
-    if "$PROJECT_DIR/.venv/bin/python" -c "from mcp.server.fastmcp import FastMCP" 2>/dev/null; then
+    if "$VENV_DIR/bin/python" -c "from mcp.server.fastmcp import FastMCP" 2>/dev/null; then
         ok "MCP 依赖已安装"
     else
         fail "MCP 依赖未安装"
     fi
     
     # 测试 wechat-mcp-macos
-    if "$PROJECT_DIR/.venv/bin/python" -c "import wechat_mcp_macos" 2>/dev/null; then
+    if "$VENV_DIR/bin/python" -c "import wechat_mcp_macos" 2>/dev/null; then
         ok "wechat-mcp-macos 已安装"
     else
         fail "wechat-mcp-macos 未安装"
     fi
     
     # 测试 zstandard
-    if "$PROJECT_DIR/.venv/bin/python" -c "import zstandard" 2>/dev/null; then
+    if "$VENV_DIR/bin/python" -c "import zstandard" 2>/dev/null; then
         ok "zstandard 已安装"
     else
         fail "zstandard 未安装"
@@ -219,7 +220,7 @@ else
 fi
 
 # 检查 sender.py 补丁
-sender_py="$PROJECT_DIR/.venv/lib/python3.*/site-packages/wechat_mcp_macos/sender.py"
+sender_py="$VENV_DIR/lib/python3.*/site-packages/wechat_mcp_macos/sender.py"
 if ls $sender_py 1>/dev/null 2>&1; then
     if grep -q 're.findall' $sender_py 2>/dev/null; then
         ok "sender.py 已补丁"

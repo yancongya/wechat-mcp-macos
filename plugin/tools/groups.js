@@ -3,9 +3,9 @@ const path = require("path");
 
 const PROJECT_DIR = path.join(
   process.env.HOME,
-  "Desktop/OH-WorkSpace/wechat-decrypt-macos"
+  "Desktop/OH-WorkSpace/wechat-mcp-macos"
 );
-const VENV_PYTHON = path.join(PROJECT_DIR, ".venv/bin/python");
+const VENV_PYTHON = path.join(PROJECT_DIR, "backend/.venv/bin/python");
 
 export const name = "wechat_groups";
 export const description = "列出所有微信群聊";
