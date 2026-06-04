@@ -221,6 +221,24 @@ SCHEMA = """{
     "一句话总结第二条",
     "一句话总结第三条"
   ],
+  "report_meta": {
+    "message_count": 763,
+    "sender_count": 40,
+    "text_count": 561,
+    "raw_chars": 26034,
+    "compressed_chars": 2049,
+    "chars_saved": 23985,
+    "estimated_tokens_saved": 21805,
+    "compression_ratio": 7.9
+  },
+  "activity": [
+    {"hour": "10", "count": 20},
+    {"hour": "11", "count": 100}
+  ],
+  "top_speakers": [
+    {"name": "群友A", "avatar_name": "真实昵称", "count": 73}
+  ],
+  "keyword_tags": ["blender", "qwen", "Codex"],
   "topics": [
     {
       "title": "话题标题",
@@ -228,12 +246,37 @@ SCHEMA = """{
       "summary": "一句话摘要",
       "detail": "详细分析段落，可以多段用换行分隔。",
       "quotes": [
-        ["发言人", "引用内容"],
-        ["发言人2", "引用内容2"]
+        {
+          "name": "群友A",
+          "avatar_name": "真实昵称",
+          "content": "引用内容"
+        },
+        {
+          "name": "群友B",
+          "avatar_username": "wxid_xxx",
+          "content": "引用内容2"
+        }
       ]
     }
   ]
 }"""
+
+
+def normalize_quote(quote):
+    """兼容旧版 [name, content] 和新版对象格式。"""
+    if isinstance(quote, dict):
+        name = quote.get("name") or quote.get("display_name") or quote.get("speaker") or "群友"
+        content = quote.get("content") or quote.get("text") or quote.get("quote") or ""
+        avatar_key = quote.get("avatar_username") or quote.get("avatar_name") or quote.get("avatar") or name
+        return name, content, avatar_key
+
+    if isinstance(quote, (list, tuple)) and len(quote) >= 2:
+        name = quote[0] or "群友"
+        content = quote[1] or ""
+        avatar_key = quote[2] if len(quote) >= 3 and quote[2] else name
+        return name, content, avatar_key
+
+    return "群友", str(quote), "群友"
 
 
 # ── 渲染 ──
@@ -249,7 +292,8 @@ def calc_topic_height(topic, f_body, f_quote, f_name, content_w, s, avatars_enab
     
     avatar_size = int(32 * s) if avatars_enabled else 0
     
-    for name, q in topic.get("quotes", []):
+    for quote in topic.get("quotes", []):
+        name, q, _avatar_key = normalize_quote(quote)
         h += int(18 * s)
         ql = wrap_text(q, f_quote, content_w - int(60 * s) - avatar_size)
         h += len(ql) * int(16 * s)
@@ -268,6 +312,103 @@ def calc_summary_height(summary_items, f_summary, content_w, s):
         h += int(6 * s)  # 行间距
     h += int(8 * s)  # 底部间隔
     return h
+
+
+def calc_dashboard_height(report_meta, activity, top_speakers, keyword_tags, s):
+    if not (activity or top_speakers or keyword_tags):
+        return 0
+    h = int(78 * s)
+    if top_speakers:
+        rows = (len(top_speakers) + 2) // 3
+        h += rows * int(44 * s)
+    if keyword_tags:
+        rows = (len(keyword_tags) + 3) // 4
+        h += rows * int(24 * s)
+    h += int(18 * s)
+    return h
+
+
+def draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers, keyword_tags, avatars_enabled, db_dir, keys, display_name_to_username):
+    if not (activity or top_speakers or keyword_tags):
+        return cy
+    f_sec = get_font(int(16 * s))
+    f_body = get_font(int(12 * s))
+    f_meta = get_font(int(11 * s))
+    f_small = get_font(int(10 * s))
+
+    if activity:
+        draw.text((PAD, cy), "📈 时间段热度", fill=C_TITLE, font=f_sec)
+        cy += int(22 * s)
+        chart_h = int(56 * s)
+        chart_x = PAD
+        chart_y = cy
+        chart_w = W - 2 * PAD
+        draw.rounded_rectangle([chart_x, chart_y, chart_x + chart_w, chart_y + chart_h], radius=int(8 * s), fill=C_QUOTE_BG)
+        counts = [a.get('count', 0) for a in activity]
+        max_count = max(counts) if counts else 1
+        points = []
+        inner_pad = int(10 * s)
+        for idx, item in enumerate(activity):
+            x = chart_x + inner_pad + idx * ((chart_w - inner_pad * 2) / 23)
+            y = chart_y + chart_h - inner_pad - ((item.get('count', 0) / max_count) * (chart_h - inner_pad * 2) if max_count else 0)
+            points.append((x, y))
+        if len(points) >= 2:
+            draw.line(points, fill=ACCENT[1], width=max(2, s))
+        for px, py in points[::4]:
+            draw.ellipse([px - 2 * s, py - 2 * s, px + 2 * s, py + 2 * s], fill=ACCENT[1])
+        draw.text((chart_x + int(10 * s), chart_y + int(6 * s)), "时间段热度", fill=C_TITLE, font=f_meta)
+        for tick in [0, 6, 12, 18, 23]:
+            label = activity[tick].get('hour', f"{tick:02d}")
+            tx = chart_x + inner_pad + tick * ((chart_w - inner_pad * 2) / 23)
+            draw.text((tx - int(6 * s), chart_y + chart_h - int(14 * s)), label, fill=C_META, font=f_small)
+        cy += chart_h + int(14 * s)
+
+    if top_speakers:
+        draw.text((PAD, cy), "🙋 活跃群友", fill=C_TITLE, font=f_meta)
+        cy += int(18 * s)
+        avatar_size = int(26 * s)
+        col_w = int((W - 2 * PAD) / 3)
+        for idx, sp in enumerate(top_speakers):
+            row = idx // 3
+            col = idx % 3
+            x = PAD + col * col_w
+            y = cy + row * int(44 * s)
+            name = sp.get('name', '群友')
+            avatar_key = sp.get('avatar_name') or name
+            if avatars_enabled:
+                avatar = load_avatar(avatar_key, db_dir, keys, avatar_size, display_name_to_username)
+                if avatar:
+                    img.paste(avatar, (x, y), avatar)
+                else:
+                    draw_avatar_placeholder(draw, x, y, avatar_size, name, ACCENT[idx % len(ACCENT)])
+            else:
+                draw_avatar_placeholder(draw, x, y, avatar_size, name, ACCENT[idx % len(ACCENT)])
+            draw.text((x + avatar_size + int(6 * s), y), name[:8], fill=C_TITLE, font=f_body)
+            draw.text((x + avatar_size + int(6 * s), y + int(14 * s)), f"{sp.get('count', 0)} 条", fill=C_META, font=f_small)
+        cy += ((len(top_speakers) + 2) // 3) * int(44 * s)
+
+    if keyword_tags:
+        draw.text((PAD, cy), "🏷️ 关键词", fill=C_TITLE, font=f_meta)
+        cy += int(18 * s)
+        x = PAD
+        row_h = int(22 * s)
+        max_x = W - PAD
+        for idx, tag in enumerate(keyword_tags):
+            tag_text = str(tag)
+            tag_w = f_meta.getbbox(tag_text)[2] + int(20 * s)
+            if x + tag_w > max_x:
+                x = PAD
+                cy += row_h
+            color = ACCENT[idx % len(ACCENT)]
+            draw.rounded_rectangle([x, cy, x + tag_w, cy + int(18 * s)], radius=int(8 * s), fill=(color[0], color[1], color[2]))
+            draw.text((x + int(10 * s), cy + int(3 * s)), tag_text, fill=(255, 255, 255), font=f_small)
+            x += tag_w + int(8 * s)
+        cy += row_h
+
+    cy += int(10 * s)
+    draw.line([(PAD + int(24 * s), cy), (W - PAD - int(24 * s), cy)], fill=C_DIV, width=s)
+    cy += int(16 * s)
+    return cy
 
 
 def render(data, output_path, scale=2, db_dir=None, keys=None):
@@ -290,6 +431,10 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
 
     header = data["header"]
     topics = data["topics"]
+    report_meta = data.get("report_meta", {})
+    activity = data.get("activity", [])
+    top_speakers = data.get("top_speakers", [])
+    keyword_tags = data.get("keyword_tags", [])
 
     # 构建显示名到用户名的映射（用于头像查找）
     display_name_to_username = {}
@@ -330,6 +475,8 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
         f_summary = get_font(int(12 * s))
         H += calc_summary_height(summary_items, f_summary, CONTENT_W, s)
         H += int(8 * s)  # 额外间隔
+
+    H += calc_dashboard_height(report_meta, activity, top_speakers, keyword_tags, s)
     
     for t in topics:
         H += calc_topic_height(t, f_body, f_quote, f_name, CONTENT_W, s, avatars_enabled)
@@ -371,6 +518,15 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
     draw.text(((W - (bb[2] - bb[0])) // 2, cy), m, fill=C_META, font=f_meta)
     cy += int(20 * s)
 
+    if report_meta:
+        reduced_pct = round(100 - float(report_meta.get('compression_ratio', 0)), 1)
+        raw_chars = report_meta.get('raw_chars', 0)
+        compressed_chars = report_meta.get('compressed_chars', 0)
+        meta2 = f"原始文本 {raw_chars} 字 → 压缩 {compressed_chars} 字  ·  约减少 {reduced_pct}% 的 tokens"
+        bb2 = f_meta.getbbox(meta2)
+        draw.text(((W - (bb2[2] - bb2[0])) // 2, cy), meta2, fill=C_BODY_LIGHT, font=f_meta)
+        cy += int(18 * s)
+
     # 热词标签
     hw = f"🔥 热词：{header['hot_word']}"
     bb = f_tag.getbbox(hw)
@@ -387,6 +543,8 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
     # 分隔线
     draw.line([(PAD + int(24 * s), cy), (W - PAD - int(24 * s), cy)], fill=C_DIV, width=s)
     cy += int(16 * s)
+
+    cy = draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers, keyword_tags, avatars_enabled, db_dir, keys, display_name_to_username)
 
     # 省流版
     if summary_items:
@@ -451,14 +609,16 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
         cy += int(8 * s)
 
         # 关键引用
-        for name, q in topic.get("quotes", []):
+        for quote in topic.get("quotes", []):
+            name, q, avatar_key = normalize_quote(quote)
+
             # 引用条背景
             draw.rounded_rectangle([PAD + int(30 * s), cy, W - PAD - int(24 * s), cy + int(20 * s)],
                                    radius=int(4 * s), fill=C_QUOTE_BG)
             
             # 头像
             if avatars_enabled:
-                avatar = load_avatar(name, db_dir, keys, avatar_size, display_name_to_username)
+                avatar = load_avatar(avatar_key, db_dir, keys, avatar_size, display_name_to_username)
                 if avatar:
                     img.paste(avatar, (PAD + int(30 * s), cy), avatar)
                 else:

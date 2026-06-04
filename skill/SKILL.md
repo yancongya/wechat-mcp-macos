@@ -71,14 +71,27 @@ backend/.venv/bin/python pipeline.py --dry-run --hours 24 --voice-engine whisper
 # 列出所有已注册 prompt
 backend/.venv/bin/python prompts/render.py --list
 
-# 匹配渲染
+# 生成给 LLM 的 JSON 长图总结 prompt
 backend/.venv/bin/python prompts/render.py "琅泽群"
 
-# 指定时间 + 生成图片
-backend/.venv/bin/python prompts/render.py "琅泽群" --hours 48 --image
-
-# JSON 输出（供 AI 链式调用）
+# JSON 输出（查看匹配到哪个 prompt、基础统计等）
 backend/.venv/bin/python prompts/render.py "琅泽群" --json
+```
+
+### 一键工作流脚本
+```bash
+# 1) 取数 + 生成规则摘要 + 生成给 LLM 的 prompt
+bash scripts/group-summary-workflow.sh prepare "【琅泽-老K】几何节点全能班0群" 0
+
+# 2) 把 LLM 返回的 JSON 保存为 summary.json 后，渲染长图
+# render 会自动执行 enrich + validate，再出图
+bash scripts/group-summary-workflow.sh render /path/to/summary.json
+```
+
+### 渲染前自检
+```bash
+# 单独校验增强版 JSON
+backend/.venv/bin/python scripts/validate_summary_json.py /path/to/summary.enriched.json
 ```
 
 添加新 trigger：编辑 `prompts/registry.json`，新增 prompts 列表条目即可，无需改代码。
@@ -102,17 +115,33 @@ AI 总结输出的 JSON schema：
     "stats": "N 人参与 · N 条消息",
     "hot_word": "热词"
   },
+  "summary": [
+    "省流版第一句话",
+    "省流版第二句话"
+  ],
   "topics": [
     {
       "title": "话题标题",
       "time": "10:00 - 11:00",
       "summary": "一句话摘要",
       "detail": "详细分析段落",
-      "quotes": [["发言人", "引用内容"]]
+      "quotes": [
+        {
+          "name": "群友A",
+          "avatar_name": "真实昵称",
+          "content": "引用内容"
+        }
+      ]
     }
   ]
 }
 ```
+
+头像显示默认规则：
+- 默认开启头像渲染，不要传 `--no-avatars`
+- `quotes` 推荐使用对象格式，并显式提供 `avatar_name` 或 `avatar_username`
+- `name` 可以写成“群友A”等展示名，头像仍会按 `avatar_name` / `avatar_username` 匹配
+- 旧格式 `[["发言人", "引用内容"]]` 仍兼容，但只有名字能直接映射到微信联系人时才会显示真实头像
 
 ### 群 wxid 速查
 ```
@@ -134,7 +163,9 @@ backend/.venv/bin/python cleanup.py          # 清理
 1. **调用数据工具** → 先通过 render.py / wechat_read / pipeline.py 获取原始数据
 2. **分析数据** → 基于返回的真实数据做分析
 3. **输出结果** → 基于数据分析给出回答
-4. **不得跳过步骤 1** → 不允许直接用自身知识替代表述或猜测内容
+4. **需要图片时输出 JSON** → 默认让 LLM 生成可直接喂给 `summary_img.py` 的 JSON
+5. **默认保留头像键** → `quotes` 优先使用对象格式，并写入 `avatar_name` 或 `avatar_username`
+6. **不得跳过步骤 1** → 不允许直接用自身知识替代表述或猜测内容
 
 ## 决策规范
 

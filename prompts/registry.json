@@ -3,7 +3,7 @@
   "comment": "Prompt registry — 按 trigger 匹配 chat/contact 输出不同 prompt",
 
   "defaults": {
-    "hours": 24,
+    "hours": 0,
     "limit": 200,
     "output": {
       "image_style": {
@@ -27,13 +27,14 @@
       "input": {
         "source": "pipeline",
         "pipeline_args": {
-          "hours": 24,
+          "hours": 0,
+          "limit": 1200,
           "voice_engine": "whisper"
         }
       },
       "process": {
         "mode": "llm",
-        "template_file": "langze-summary.txt"
+        "template_file": "group-summary-image-json.txt"
       },
       "output": {
         "text": true,
@@ -52,7 +53,7 @@
       "input": {
         "source": "pipeline",
         "pipeline_args": {
-          "hours": 24
+          "hours": 0
         }
       },
       "process": {
@@ -76,7 +77,7 @@
       "input": {
         "source": "pipeline",
         "pipeline_args": {
-          "hours": 24
+          "hours": 0
         }
       },
       "process": {
@@ -99,7 +100,7 @@
       "input": {
         "source": "raw",
         "pipeline_args": {
-          "hours": 24
+          "hours": 0
         }
       },
       "process": {
