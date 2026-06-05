@@ -464,7 +464,7 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
         except Exception:
             pass
 
-    # 计算高度
+    # 计算高度（带 50% 安全余量，防止预计算偏差导致内容写出画布）
     avatars_enabled = db_dir is not None and keys is not None
     H = int(60 * s)
     H += int(32 * s) + int(8 * s) + int(20 * s) + int(24 * s) + int(16 * s)
@@ -481,6 +481,8 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
     for t in topics:
         H += calc_topic_height(t, f_body, f_quote, f_name, CONTENT_W, s, avatars_enabled)
     H += int(50 * s)
+    # 安全余量：2x，防止预计算偏差导致内容画出画布
+    H = int(H * 2)
 
     # 创建纸张纹理背景
     img = create_paper_texture(W, H)
@@ -554,8 +556,10 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
         draw.text((PAD + int(10 * s), cy), "📌 省流版", fill=C_TITLE, font=f_sec)
         cy += int(24 * s)
         
-        # 省流版内容
+        # 省流版内容（过滤掉压缩技术指标行）
         for item in summary_items:
+            if item.startswith("原始文本约") or "tokens 消耗" in item or item.startswith("按当前中文场景"):
+                continue
             # 圆点
             draw.ellipse([PAD + int(10 * s), cy + int(6 * s), 
                          PAD + int(14 * s), cy + int(10 * s)], fill=C_META)
@@ -658,8 +662,30 @@ def render(data, output_path, scale=2, db_dir=None, keys=None):
                           radius=int(8 * s), fill=C_QUOTE_BG)
     draw.text(((W - footer_w) // 2, cy), footer, fill=C_META, font=f_footer)
 
+    # 根据实际内容计算最终高度（基于底部装饰位置 + 留白）
+    padding = int(20 * s)
+    final_h = cy + padding
+    if final_h > H:
+        # 如果超出画布，需要扩展
+        import random
+        new_img = Image.new('RGB', (W, final_h), BG_PAPER)
+        new_img.paste(img, (0, 0))
+        random.seed(42)
+        new_draw = ImageDraw.Draw(new_img)
+        for _ in range((final_h - H) * W // 8):
+            x = random.randint(0, W - 1)
+            y = random.randint(H, final_h - 1)
+            r = BG_PAPER[0] + random.randint(-8, 8)
+            g = BG_PAPER[1] + random.randint(-8, 8)
+            b = BG_PAPER[2] + random.randint(-8, 8)
+            new_draw.point((x, y), fill=(r, g, b))
+        img = new_img
+    elif final_h < H:
+        # 裁剪掉多余空白
+        img = img.crop((0, 0, W, final_h))
+
     img.save(output_path, "PNG")
-    return f"{output_path} ({W}x{H})"
+    return f"{output_path} ({W}x{final_h})"
 
 
 # ── 入口 ──
