@@ -119,13 +119,17 @@ wechat-mcp-macos/
 │   ├── templates/          # LLM prompt 模板文件
 │   └── summaries/          # 生成的长图（.gitignore）
 ├── pipeline.py             # 纯规则总结
-├── summary_img.py          # 长图渲染
+├── summary_img.py          # 长图渲染（含自动裁切与高度适配）
 ├── voice_to_text.py        # 语音转文字
 ├── extract-messages.py     # 消息提取
 ├── init-keys.py            # 密钥提取
 ├── server.py               # 独立 MCP Server（FastMCP）
 ├── cleanup.py              # 缓存清理
 ├── crypto/                 # 解密模块
+├── scripts/                # 流水线脚本
+│   ├── group-summary-workflow.sh
+│   ├── enrich_summary_json.py
+│   └── validate_summary_json.py
 ├── contacts.example.json
 ├── requirements.txt
 └── .gitignore
@@ -162,8 +166,14 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 - 标题下统计说明：原始文本字数、压缩后字数、约减少的 tokens 百分比
 - 时间段热度曲线
 - 活跃群友头像 + 名字 + 消息数
-- 关键词 tag
-- 省流版前置补充：字符压缩量、粗估 token 节省
+- 关键词 tag p- 省流版（自动过滤技术指标行，避免与顶部统计说明重复）
+
+## 渲染防裁切机制
+
+`summary_img.py` 内置了内容安全保护：
+- 预计算高度时预留 2x 安全余量，防止文字写出画布
+- 渲染完成后根据实际内容定位自动裁切多余空白
+- 若内容超出预计算范围，会自动扩展画布并补全纸张纹理
 
 ## Prompt Registry
 
