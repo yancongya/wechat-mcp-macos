@@ -19,9 +19,12 @@ scripts/group-summary-workflow.sh ← prepare / render 一键流水线
     └── validate_summary_json.py  ← 渲染前自检
     ↓
 backend/.venv/                    ← Python 运行时（wechat_mcp_macos 包）
-    ├── pipeline.py               ← 纯规则总结
+    ├── pipeline.py               ← 纯规则总结 + 联系人解析
     ├── summary_img.py            ← 长图渲染
     └── voice_to_text.py          ← 语音转文字
+
+contacts.json                    ← 从 contact.db 解密的通讯录（6000+ 条）
+group_nicknames.json             ← 群成员补充昵称映射（fallback）
 ```
 
 ## 功能
@@ -99,6 +102,49 @@ bash scripts/group-summary-workflow.sh render /path/to/summary.json
 backend/.venv/bin/python scripts/validate_summary_json.py /path/to/summary.enriched.json
 ```
 
+## 联系人解析
+
+`resolve_name()` 三层 fallback，确保群聊总结中的发送者始终显示可读昵称：
+
+1. **contacts.json**（通讯录，6000+ 条）— 从 contact.db 解密获得
+2. **group_nicknames.json**（群成员补充映射）— 手动维护，用于通讯录中没有的群友
+3. **截断 wxid**（兜底）— 如 `wxid_psli7doelfml22` → `psli7do`
+
+### 刷新通讯录
+
+```bash
+# 用现有密钥解密 contact.db 并更新 contacts.json
+cd wechat-mcp-macos && python3 -c "
+import json, os, sqlite3, sys
+sys.path.insert(0, 'backend/.venv/lib/python3.14/site-packages')
+from wechat_mcp_macos.decryptor import decrypt_database, decrypt_wal
+
+with open('wechat_keys.json') as f:
+    keys = json.load(f)
+contact_db = os.path.expanduser('~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_hx1vuhtjkb3v22_1dd5/db_storage/contact/contact.db')
+enc_key = keys.get('contact/contact.db')
+cache = os.path.expanduser('~/.wechat-mcp/decrypted/contact/contact.db')
+os.makedirs(os.path.dirname(cache), exist_ok=True)
+
+decrypt_database(contact_db, cache, enc_key)
+if os.path.exists(contact_db + '-wal'):
+    decrypt_wal(contact_db + '-wal', cache, enc_key)
+
+conn = sqlite3.connect(cache)
+contacts = {}
+for row in conn.execute('SELECT username, nick_name, remark FROM contact WHERE username != \"\"'):
+    uname, nick, remark = row
+    contacts[uname] = {'nickname': nick or '', 'remark': remark or ''}
+conn.close()
+
+with open('contacts.json', 'w') as f:
+    json.dump(contacts, f, ensure_ascii=False, indent=2)
+print(f'contacts.json updated: {len(contacts)} entries')
+"
+```
+
+若密钥过期，需重新运行 `sign_wechat.sh` + `extract_keys.sh`。
+
 ## 项目结构
 
 ```
@@ -106,32 +152,19 @@ wechat-mcp-macos/
 ├── backend/
 │   └── .venv/              # Python 运行时（wechat_mcp_macos 包）
 ├── plugin/                 # Hana 插件（manifest.json + 4 tools）
-│   ├── manifest.json
-│   ├── index.js
-│   ├── tools/              # status / read / search / groups
-│   └── routes/             # 状态页面
 ├── skill/                  # Hana Agent skill
-│   ├── SKILL.md
-│   └── scripts/            # 幂等安装脚本
 ├── prompts/                # Prompt 管理系统
-│   ├── registry.json       # trigger 定义（群/联系人 → prompt 映射）
-│   ├── render.py           # 匹配引擎：取数据 → 填充模板
+│   ├── registry.json       # trigger 定义
+│   ├── render.py           # 匹配引擎
 │   ├── templates/          # LLM prompt 模板文件
 │   └── summaries/          # 生成的长图（.gitignore）
-├── pipeline.py             # 纯规则总结
-├── summary_img.py          # 长图渲染（含自动裁切与高度适配）
+├── pipeline.py             # 纯规则总结 + 联系人解析
+├── summary_img.py          # 长图渲染
 ├── voice_to_text.py        # 语音转文字
-├── extract-messages.py     # 消息提取
-├── init-keys.py            # 密钥提取
-├── server.py               # 独立 MCP Server（FastMCP）
-├── cleanup.py              # 缓存清理
+├── contacts.json           # 通讯录映射（从 contact.db 解密）
+├── group_nicknames.json    # 群成员补充昵称（fallback）
 ├── crypto/                 # 解密模块
 ├── scripts/                # 流水线脚本
-│   ├── group-summary-workflow.sh
-│   ├── enrich_summary_json.py
-│   └── validate_summary_json.py
-├── contacts.example.json
-├── requirements.txt
 └── .gitignore
 ```
 

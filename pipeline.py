@@ -44,6 +44,7 @@ WATCHED_GROUPS = [
 ]
 
 CONTACTS_FILE = PROJECT_DIR / "contacts.json"
+GROUP_NICKNAMES_FILE = PROJECT_DIR / "group_nicknames.json"
 VENV_PYTHON = PROJECT_DIR / "backend" / ".venv" / "bin" / "python"
 
 # ── 数据加载 ──
@@ -60,10 +61,35 @@ def load_contacts():
             return json.load(f)
     return {}
 
-def resolve_name(wxid, contacts):
+def _load_group_nicknames():
+    """加载群成员补充昵称映射。"""
+    if GROUP_NICKNAMES_FILE.exists():
+        with open(GROUP_NICKNAMES_FILE) as f:
+            data = json.load(f)
+        # 过滤掉 _comment 等元数据
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    return {}
+
+
+def resolve_name(wxid, contacts, group_nicknames=None):
+    """解析发送者昵称，三层 fallback：contacts → group_nicknames → 截断 wxid。"""
+    if not wxid:
+        return None
+
+    # 第一层：contacts.json（通讯录，6000+ 条）
     if wxid in contacts:
         info = contacts[wxid]
-        return info.get("remark") or info.get("nickname") or wxid
+        name = info.get("remark") or info.get("nickname")
+        if name:
+            return name
+
+    # 第二层：group_nicknames.json（群成员补充映射）
+    if group_nicknames and wxid in group_nicknames:
+        return group_nicknames[wxid]
+
+    # 第三层：截断 wxid，至少比完整 wxid 可读
+    if wxid.startswith("wxid_") and len(wxid) > 12:
+        return wxid[5:12]  # 取中间部分，如 "psli7do"
     return wxid
 
 # ── 消息提取（基于 wechat-digest 的 extract-messages） ──
@@ -411,7 +437,7 @@ def _parse_type49(content):
 
 # ── 纯规则总结引擎 ──
 
-def generate_summary(messages, contacts, group_name=""):
+def generate_summary(messages, contacts, group_name="", group_nicknames=None):
     """纯规则生成群聊总结（优化版）"""
     if not messages:
         return "今日无消息"
@@ -426,7 +452,7 @@ def generate_summary(messages, contacts, group_name=""):
     sender_counts = Counter()
     for m in messages:
         if not m["is_me"]:
-            name = resolve_name(m["sender_wxid"], contacts)
+            name = resolve_name(m["sender_wxid"], contacts, group_nicknames)
             if name:  # 过滤空名
                 sender_counts[name] += 1
 
@@ -474,7 +500,7 @@ def generate_summary(messages, contacts, group_name=""):
         lines.append("")
 
     # ── 关键讨论（精简） ──
-    discussions = _extract_discussions(messages, contacts)
+    discussions = _extract_discussions(messages, contacts, group_nicknames)
     if discussions:
         lines.append("💬 今日话题")
         for d in discussions[:3]:
@@ -491,7 +517,7 @@ def generate_summary(messages, contacts, group_name=""):
 
     return "\n".join(lines)
 
-def generate_brief_summary(messages, contacts, group_name=""):
+def generate_brief_summary(messages, contacts, group_name="", group_nicknames=None):
     """生成精简版总结（适合群内发送）"""
     if not messages:
         return "今日无消息"
@@ -505,7 +531,7 @@ def generate_brief_summary(messages, contacts, group_name=""):
     sender_counts = Counter()
     for m in messages:
         if not m["is_me"]:
-            name = resolve_name(m["sender_wxid"], contacts)
+            name = resolve_name(m["sender_wxid"], contacts, group_nicknames)
             sender_counts[name] += 1
 
     lines.append("🏆 活跃 Top 5")
@@ -609,7 +635,7 @@ def _extract_topic_keywords(messages, top_n=5):
     word_freq = Counter(w for w in words if w not in stopwords and len(w) >= 2)
     return [w for w, c in word_freq.most_common(top_n) if c >= 2]
 
-def _summarize_segment(segment, contacts):
+def _summarize_segment(segment, contacts, group_nicknames=None):
     """将一段消息总结为一个话题描述"""
     if not segment:
         return ""
@@ -617,7 +643,7 @@ def _summarize_segment(segment, contacts):
     senders = set()
     for m in segment:
         if not m["is_me"]:
-            name = resolve_name(m["sender_wxid"], contacts)
+            name = resolve_name(m["sender_wxid"], contacts, group_nicknames)
             if name:
                 senders.add(name)
 
@@ -646,7 +672,7 @@ def _summarize_segment(segment, contacts):
 
     return f"{topic} ({participants}, {first_time}-{last_time}, {len(segment)}条)"
 
-def _extract_discussions(messages, contacts):
+def _extract_discussions(messages, contacts, group_nicknames=None):
     """提取讨论话题（优化版：时间分段 + 关键词聚类）"""
     # 过滤噪音
     clean = _filter_noise(messages)
@@ -669,7 +695,7 @@ def _extract_discussions(messages, contacts):
     # 每段生成话题摘要
     discussions = []
     for seg in segments:
-        summary = _summarize_segment(seg, contacts)
+        summary = _summarize_segment(seg, contacts, group_nicknames)
         if summary:
             discussions.append({"topic": summary, "msg_count": len(seg)})
 
@@ -692,7 +718,7 @@ def _extract_action_items(messages, contacts):
         for pat in patterns:
             match = re.search(pat, text)
             if match:
-                sender = resolve_name(m["sender_wxid"], contacts)
+                sender = resolve_name(m["sender_wxid"], contacts, group_nicknames)
                 snippet = text[max(0, match.start() - 10):match.end() + 10]
                 if len(snippet) > 60:
                     snippet = snippet[:57] + "..."
@@ -817,8 +843,7 @@ def main():
     print()
 
     contacts = load_contacts()
-
-    # 预构建 wxid → 名称映射
+    group_nicknames = _load_group_nicknames()
     name_map = {}
     try:
         cfg_db = load_config()
@@ -847,7 +872,7 @@ def main():
             print("   跳过（无消息）")
             continue
 
-        summary = generate_summary(messages, contacts, group_wxid)
+        summary = generate_summary(messages, contacts, group_wxid, group_nicknames)
         all_summaries.append({"wxid": group_wxid, "summary": summary, "msg_count": len(messages)})
 
         if args.json:
