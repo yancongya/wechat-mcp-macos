@@ -39,12 +39,18 @@ def main():
         msg_count = metrics.get("message_count", 0)
         sender_count = metrics.get("sender_count", 0)
         text_count = metrics.get("text_count", 0)
-        data.setdefault("header", {})["stats"] = f"约{msg_count}条消息 · {sender_count}人参与 · 文本{text_count}条"
+        # 只在有实际数据时覆盖 stats，避免 0 值覆盖已有内容
+        if msg_count > 0 or sender_count > 0:
+            data.setdefault("header", {})["stats"] = f"约{msg_count}条消息 · {sender_count}人参与 · 文本{text_count}条"
 
     data["report_meta"] = metrics
-    data["activity"] = compressed.get("activity_by_hour", [])
-    data["top_speakers"] = compressed.get("top_speakers", [])[:6]
-    data["keyword_tags"] = compressed.get("hot_words", [])[:8]
+    # 只在有数据时覆盖，避免空 context 清掉 summary.json 已有内容
+    if compressed.get("activity_by_hour"):
+        data["activity"] = compressed["activity_by_hour"]
+    if compressed.get("top_speakers"):
+        data["top_speakers"] = compressed["top_speakers"][:6]
+    if compressed.get("hot_words"):
+        data["keyword_tags"] = compressed["hot_words"][:8]
 
     summary_items = data.get("summary", [])
     prefix = []
