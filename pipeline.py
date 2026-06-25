@@ -272,11 +272,15 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
             if real_sender_id in name2id:
                 sender_wxid = name2id[real_sender_id]
         
-        if real_type == 1:
+        # 解析所有消息类型的 wxid 前缀（wxid:\n内容）
+        if not sender_wxid and ":\n" in text:
             parts = text.split(":\n", 1)
-            if len(parts) == 2:
+            if len(parts) == 2 and parts[0].strip():
                 sender_wxid = parts[0].strip()
                 text = parts[1].strip()
+        
+        if real_type == 1:
+            pass  # 已在上面处理
         elif real_type == 34:
             # 语音消息 - 从 voice_entries 按时间戳匹配
             text = "[语音]"
