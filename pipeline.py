@@ -151,7 +151,7 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
                     continue
 
                 rows = conn.execute(f"""
-                    SELECT create_time, message_content, WCDB_CT_message_content, local_type
+                    SELECT create_time, message_content, WCDB_CT_message_content, local_type, real_sender_id
                     FROM "{table_name}"
                     WHERE create_time >= ? AND create_time < ?
                     ORDER BY create_time
@@ -197,7 +197,7 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
     my_id = _detect_my_sender_id(msg_dbs)
 
     # 检测语音
-    has_voice = any((lt & 0xFFFFFFFF) == 34 for _, _, _, lt in all_rows)
+    has_voice = any((lt & 0xFFFFFFFF) == 34 for _, _, _, lt, _ in all_rows)
     voice_entries = []
     transcriber = None
     if has_voice:
@@ -236,7 +236,7 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
 
     # 解析消息
     messages = []
-    for ts, content, ct, lt in all_rows:
+    for ts, content, ct, lt, real_sender_id in all_rows:
         real_type = lt & 0xFFFFFFFF
         if real_type not in (1, 3, 34, 43, 47, 49, 10000):
             continue
@@ -255,17 +255,19 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
         # 解析发送者
         sender_wxid = ""
         is_me = False
+        
+        # 直接用 real_sender_id 检查是否是自己
+        if my_id and real_sender_id == my_id:
+            is_me = True
+            # 用 Name2Id 反查 wxid
+            if real_sender_id in name2id:
+                sender_wxid = name2id[real_sender_id]
+        
         if real_type == 1:
             parts = text.split(":\n", 1)
             if len(parts) == 2:
                 sender_wxid = parts[0].strip()
                 text = parts[1].strip()
-            # 检查是否是自己
-            for sid, wxid in name2id.items():
-                if wxid == sender_wxid:
-                    if str(sid) == str(my_id):
-                        is_me = True
-                    break
         elif real_type == 34:
             # 语音消息 - 从 voice_entries 按时间戳匹配
             text = "[语音]"
@@ -303,7 +305,36 @@ def extract_messages(group_username, hours=24, voice_engine="auto"):
     return messages
 
 def _detect_my_sender_id(msg_dbs):
-    """检测自己的 sender_id"""
+    """检测自己的 sender_id。优先从 config 的 self_name 获取。"""
+    cfg, _ = load_config()
+    self_name = cfg.get("self_name", "")
+    
+    # 如果配置了 self_name，直接从 Name2Id 查找对应的 rowid
+    if self_name:
+        for key_name, db_path, enc_key in msg_dbs[:1]:
+            cache_dir = tempfile.mkdtemp(prefix="wechat-myid-")
+            out_path = os.path.join(cache_dir, "dec.db")
+            try:
+                full_decrypt(db_path, out_path, enc_key)
+                conn = sqlite3.connect(out_path)
+                try:
+                    row = conn.execute(
+                        "SELECT rowid FROM Name2Id WHERE user_name = ?",
+                        (self_name,)
+                    ).fetchone()
+                    if row:
+                        return row[0]
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
+    
+    # fallback: 自动检测（取出现频率最高的 sender_id）
     for key_name, db_path, enc_key in msg_dbs[:1]:
         cache_dir = tempfile.mkdtemp(prefix="wechat-myid-")
         out_path = os.path.join(cache_dir, "dec.db")
@@ -327,11 +358,14 @@ def _detect_my_sender_id(msg_dbs):
                         sender_sets.append(ids)
 
                 if sender_sets:
-                    common = sender_sets[0]
-                    for s in sender_sets[1:]:
-                        common = common & s
-                    common.discard(0)
-                    return min(common) if common else None
+                    # 取出现频率最高的 sender_id（而非交集）
+                    from collections import Counter
+                    counter = Counter()
+                    for s in sender_sets:
+                        counter.update(s)
+                    counter.pop(0, None)
+                    if counter:
+                        return counter.most_common(1)[0][0]
             finally:
                 conn.close()
         except Exception:
