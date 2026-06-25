@@ -79,6 +79,9 @@ def resolve_name(wxid, contacts, group_nicknames=None):
     # 第一层：contacts.json（通讯录，6000+ 条）
     if wxid in contacts:
         info = contacts[wxid]
+        # 兼容新格式（字符串）和旧格式（字典）
+        if isinstance(info, str):
+            return info if info else None
         name = info.get("remark") or info.get("nickname")
         if name:
             return name
