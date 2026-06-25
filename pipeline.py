@@ -72,9 +72,18 @@ def _load_group_nicknames():
 
 
 def resolve_name(wxid, contacts, group_nicknames=None):
-    """解析发送者昵称，三层 fallback：contacts → group_nicknames → 截断 wxid。"""
+    """解析发送者昵称，三层 fallback：contacts → group_nicknames → 截断 wxid。
+    如果是自己，返回「我」。
+    """
     if not wxid:
         return None
+    
+    # 如果是自己的 wxid，返回「我」
+    from crypto.config import load_config
+    cfg, _ = load_config()
+    self_name = cfg.get("self_name", "")
+    if self_name and wxid == self_name:
+        return "我"
 
     # 第一层：contacts.json（通讯录，6000+ 条）
     if wxid in contacts:
