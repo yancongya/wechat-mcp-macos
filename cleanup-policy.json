@@ -1,0 +1,29 @@
+{
+  "run_before_prepare": true,
+  "categories": {
+    "summary_intermediates": {
+      "enabled": true,
+      "max_age_days": 7,
+      "max_size_mb": 50,
+      "keep_newest": 6
+    },
+    "summary_images": {
+      "enabled": true,
+      "max_age_days": 30,
+      "max_size_mb": 100,
+      "keep_newest": 6
+    },
+    "decrypted": {
+      "enabled": true,
+      "max_age_days": 7,
+      "max_size_mb": 500,
+      "keep_newest": 2
+    },
+    "logs": {
+      "enabled": true,
+      "max_age_days": 30,
+      "max_size_mb": 50,
+      "keep_newest": 2
+    }
+  }
+}

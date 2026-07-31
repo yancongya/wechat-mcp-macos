@@ -209,7 +209,7 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 
 当前 enrich + render 默认会在长图里补充：
 - 标题下统计说明：原始文本字数、压缩后字数、约减少的 tokens 百分比
-- 时间段热度曲线
+- 自适应热度曲线：单日/不超过 48 小时按小时，多日/周报按 04:00 逻辑日统计每天消息量
 - 活跃群友头像 + 名字 + 消息数
 - 关键词 tag
 - 省流版（自动过滤技术指标行，避免与顶部统计说明重复）
@@ -220,6 +220,20 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 - 预计算高度时预留 2x 安全余量，防止文字写出画布
 - 渲染完成后根据实际内容定位自动裁切多余空白
 - 若内容超出预计算范围，会自动扩展画布并补全纸张纹理
+
+## 中间数据清理
+
+`cleanup-policy.json` 同时控制时间与容量阈值。默认在每次 `chat-summary-workflow.sh prepare` 前执行：
+
+```bash
+# 只检查，不删除
+backend/.venv/bin/python cleanup.py --check
+
+# 正式清理
+backend/.venv/bin/python cleanup.py
+```
+
+默认策略：总结中间文件保留 7 天/上限 50 MB，最终图片保留 30 天/上限 100 MB，解密缓存保留 7 天/上限 500 MB，日志保留 30 天/上限 50 MB；每类始终保护最新文件。配置不触碰密钥、MCP 配置或微信原始数据库。
 
 ## Prompt Registry
 

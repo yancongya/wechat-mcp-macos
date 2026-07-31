@@ -155,6 +155,30 @@ enrich_summary_json.py
 
 成功后交付 `summary.png`。不要只在文字里给出文件路径。
 
+## 中间数据清理
+
+清理策略位于 `cleanup-policy.json`，同时支持时间与容量阈值：
+
+- `summary_intermediates`：context/pipeline/prompt/summary 等中间文件
+- `summary_images`：最终 PNG/JPG，默认保留更久
+- `decrypted`：`~/.wechat-mcp/decrypted` 解密缓存
+- `logs`：`~/.wechat-mcp/logs` 日志
+
+每次 `chat-summary-workflow.sh prepare` 前默认执行一次清理；临时跳过可传 `--skip-cleanup`。
+
+```bash
+# 只查看占用和预计清理量，不删除
+backend/.venv/bin/python cleanup.py --check
+
+# 按 cleanup-policy.json 正式清理
+backend/.venv/bin/python cleanup.py
+
+# 只清理中间总结数据
+backend/.venv/bin/python cleanup.py --only summary_intermediates
+```
+
+清理顺序：先删除超过 `max_age_days` 的文件，再从最旧文件开始压到 `max_size_mb`；始终保护最新 `keep_newest` 个。不得清理密钥、配置或微信原始数据库。
+
 ## Prompt Registry
 
 `prompts/registry.json` 决定专用模板与通用 fallback。

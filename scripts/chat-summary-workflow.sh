@@ -17,6 +17,7 @@ usage() {
   --last 7d | --hours 24
   --day-start HH:MM（默认 04:00）
   --max-messages N（默认 10000）
+  --skip-cleanup（跳过本次运行前清理）
 
 兼容旧调用：
   chat-summary-workflow.sh prepare <群名/wxid> [hours]
@@ -34,6 +35,7 @@ shift
 case "$cmd" in
   prepare)
     chat=""
+    skip_cleanup=0
     render_args=()
 
     if [[ $# -gt 0 && "$1" != --* ]]; then
@@ -49,6 +51,7 @@ case "$cmd" in
       case "$1" in
         --chat) chat="${2:-}"; shift 2 ;;
         --today|--yesterday) render_args+=("$1"); shift ;;
+        --skip-cleanup) skip_cleanup=1; shift ;;
         --date|--start|--end|--last|--hours|--day-start|--max-messages)
           [[ $# -ge 2 ]] || { echo "参数 $1 缺少值" >&2; exit 1; }
           render_args+=("$1" "$2"); shift 2 ;;
@@ -57,6 +60,16 @@ case "$cmd" in
     done
 
     [[ -n "$chat" ]] || { echo "缺少 --chat" >&2; exit 1; }
+
+    if [[ "$skip_cleanup" -eq 0 ]] && "$PY" - "$ROOT_DIR/cleanup-policy.json" <<'PY'
+import json, sys
+policy = json.load(open(sys.argv[1], encoding="utf-8"))
+raise SystemExit(0 if policy.get("run_before_prepare", True) else 1)
+PY
+    then
+      echo "[清理] 按 cleanup-policy.json 执行运行前清理..."
+      "$PY" "$ROOT_DIR/cleanup.py"
+    fi
 
     stamp="$(date +%F-%H%M%S)"
     slug="$(slugify "$chat")"
