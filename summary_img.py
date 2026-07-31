@@ -364,7 +364,8 @@ def draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers
         cy += chart_h + int(14 * s)
 
     if top_speakers:
-        draw.text((PAD, cy), "🙋 活跃群友", fill=C_TITLE, font=f_meta)
+        participant_label = "🙋 活跃群友" if report_meta.get("is_group", True) else "🙋 对话参与者"
+        draw.text((PAD, cy), participant_label, fill=C_TITLE, font=f_meta)
         cy += int(18 * s)
         avatar_size = int(26 * s)
         col_w = int((W - 2 * PAD) / 3)
@@ -374,7 +375,7 @@ def draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers
             x = PAD + col * col_w
             y = cy + row * int(44 * s)
             name = sp.get('name', '群友')
-            avatar_key = sp.get('avatar_name') or name
+            avatar_key = sp.get('avatar_username') or sp.get('avatar_name') or name
             if avatars_enabled:
                 avatar = load_avatar(avatar_key, db_dir, keys, avatar_size, display_name_to_username)
                 if avatar:

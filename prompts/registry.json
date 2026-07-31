@@ -4,7 +4,7 @@
 
   "defaults": {
     "hours": 0,
-    "limit": 200,
+    "max_messages": 10000,
     "output": {
       "image_style": {
         "width": 800
@@ -43,50 +43,54 @@
     },
 
     {
-      "id": "any-group-stats",
-      "name": "任意群数据统计",
-      "description": "未匹配到特定 prompt 的群聊，回退纯规则统计",
+      "id": "any-group-summary",
+      "name": "通用群聊总结",
+      "description": "任意群聊的日期区间总结，默认输出文字和图片",
       "trigger": {
         "type": "group",
         "chats": []
       },
       "input": {
-        "source": "pipeline",
+        "source": "range-query",
         "pipeline_args": {
-          "hours": 0
+          "hours": 0,
+          "limit": 10000
         }
       },
       "process": {
-        "mode": "rule"
+        "mode": "llm",
+        "template_file": "chat-summary-image-json.txt"
       },
       "output": {
         "text": true,
         "json": true,
-        "image": false
+        "image": true
       }
     },
 
     {
-      "id": "any-contact-stats",
-      "name": "任意私聊数据统计",
-      "description": "未匹配到特定 prompt 的私聊，回退纯规则统计",
+      "id": "any-contact-summary",
+      "name": "通用私聊总结",
+      "description": "任意私聊的日期区间总结，默认输出文字和图片",
       "trigger": {
         "type": "contact",
         "contacts": []
       },
       "input": {
-        "source": "pipeline",
+        "source": "range-query",
         "pipeline_args": {
-          "hours": 0
+          "hours": 0,
+          "limit": 10000
         }
       },
       "process": {
-        "mode": "rule"
+        "mode": "llm",
+        "template_file": "chat-summary-image-json.txt"
       },
       "output": {
         "text": true,
         "json": true,
-        "image": false
+        "image": true
       }
     },
 
@@ -104,11 +108,12 @@
         }
       },
       "process": {
-        "mode": "rule"
+        "mode": "llm",
+        "template_file": "chat-summary-image-json.txt"
       },
       "output": {
         "text": true,
-        "image": false
+        "image": true
       }
     }
   ]

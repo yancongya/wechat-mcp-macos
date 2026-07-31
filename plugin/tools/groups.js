@@ -1,45 +1,31 @@
-const { execSync } = require("child_process");
-const path = require("path");
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 
-const PROJECT_DIR = path.join(
-  process.env.HOME,
-  "Desktop/OH-WorkSpace/wechat-mcp-macos"
-);
-const VENV_PYTHON = path.join(PROJECT_DIR, "backend/.venv/bin/python");
+const PROJECT_DIR = path.join(process.env.HOME, "Desktop/OH-WorkSpace/wechat-mcp-macos");
+const PYTHON = path.join(PROJECT_DIR, "backend/.venv/bin/python");
+const BRIDGE = path.join(PROJECT_DIR, "scripts/plugin_bridge.py");
 
 export const name = "wechat_groups";
-export const description = "列出所有微信群聊";
+export const description = "只读列出所有微信群聊及其 wxid。";
+export const parameters = { type: "object", properties: {} };
+export const sessionPermission = { readOnly: true };
 
 export async function execute() {
-  const code = `
-import sys, os, json
-sys.path.insert(0, '.')
-from wechat_mcp_macos.config import load_config, KEYS_FILE
-from wechat_mcp_macos.db import WeChatDB
-
-cfg = load_config()
-with open(str(KEYS_FILE)) as f:
-    keys = json.load(f)
-db = WeChatDB(cfg['db_dir'], keys)
-
-groups = db.get_groups()
-print(f"共 {len(groups)} 个群聊:")
-for g in groups:
-    print(f"  {g['name']} ({g['username']})")
-`;
-
   try {
-    const result = execSync(`${VENV_PYTHON} -c "${code.replace(/"/g, '\\"')}"`, {
+    const output = execFileSync(PYTHON, [BRIDGE, "groups"], {
       cwd: PROJECT_DIR,
-      timeout: 30000,
+      input: "{}",
+      timeout: 60000,
       encoding: "utf-8",
+      maxBuffer: 20 * 1024 * 1024,
     });
+    const result = JSON.parse(output);
+    if (!result.ok) throw new Error(result.error);
     return {
-      content: [{ type: "text", text: result.trim() }],
+      content: [{ type: "text", text: result.text }],
+      structuredContent: result,
     };
-  } catch (e) {
-    return {
-      content: [{ type: "text", text: `获取群列表失败: ${e.message}` }],
-    };
+  } catch (error) {
+    return { content: [{ type: "text", text: `获取群列表失败: ${error.stderr || error.message}` }] };
   }
 }

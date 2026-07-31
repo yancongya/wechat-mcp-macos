@@ -37,7 +37,8 @@ group_nicknames.json             ← 群成员补充昵称映射（fallback）
 | 纯规则总结 | `pipeline.py` | 零 LLM：活跃度/话题/时间线/热词 |
 | 语音转文字 | `voice_to_text.py` | SILK 解码 + faster-whisper |
 | 结构化管理 Prompt | `prompts/render.py` | registry 匹配 chat → 压缩上下文 → 生成给 LLM 的 JSON prompt |
-| 日报流水线 | `scripts/group-summary-workflow.sh` | prepare / render 一键串联取数、enrich、自检、出图 |
+| 日期区间查询 | `scripts/chat_query.py` | 群聊/私聊、任意日期区间、双方身份和头像 wxid |
+| 总结流水线 | `scripts/chat-summary-workflow.sh` | prepare / render 一键串联取数、enrich、自检、出图 |
 | 长图渲染 | `summary_img.py` | AI 总结 JSON + 统计增强数据 → Pillow 渲染为图片 |
 
 ## 快速开始
@@ -91,12 +92,16 @@ backend/.venv/bin/python pipeline.py --dry-run --hours 24 --json
 # Prompt 渲染（匹配 registry → 填充 LLM 模板）
 backend/.venv/bin/python prompts/render.py "琅泽群" --hours 48
 
-# 一键准备：取数 + 规则摘要 + 给 LLM 的 JSON prompt
-bash scripts/group-summary-workflow.sh prepare "【琅泽-老K】几何节点全能班0群" 0
+# 日期区间查询（默认日界线 04:00，结束日期包含整天）
+backend/.venv/bin/python scripts/chat_query.py "钟子鹏" \
+  --start 2026-07-25 --end 2026-07-31
 
-# 一键出图：把 LLM 返回的 summary.json 渲染成长图
-# render 会自动 enrich + validate，再出图
-bash scripts/group-summary-workflow.sh render /path/to/summary.json
+# 一键准备：群聊和私聊通用，取数 + 压缩上下文 + LLM JSON Prompt
+bash scripts/chat-summary-workflow.sh prepare \
+  --chat "钟子鹏" --start 2026-07-25 --end 2026-07-31
+
+# 一键出图：render 自动 enrich + validate，再出图
+bash scripts/chat-summary-workflow.sh render /path/to/summary.json
 
 # 单独校验增强版 JSON
 backend/.venv/bin/python scripts/validate_summary_json.py /path/to/summary.enriched.json
@@ -164,7 +169,7 @@ wechat-mcp-macos/
 ├── contacts.json           # 通讯录映射（从 contact.db 解密）
 ├── group_nicknames.json    # 群成员补充昵称（fallback）
 ├── crypto/                 # 解密模块
-├── scripts/                # 流水线脚本
+├── scripts/                # 日期解析、区间查询、群聊/私聊总结流水线
 └── .gitignore
 ```
 
@@ -191,7 +196,14 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 - "搜一下关于 xxx 的内容"
 - "总结琅泽群"
 
-底层全部走 `execSync → backend/.venv/bin/python` 直接执行，零 token 开销。
+插件通过 `execFileSync + JSON stdin → scripts/plugin_bridge.py` 调用仓库查询核心，避免字符串拼接与输入转义风险。
+
+读取与搜索均支持：
+- `date/start/end/today/yesterday/last/hours`
+- 默认 04:00 日界线
+- “我”与联系人/群成员身份识别
+- `avatar_username` 真实头像键
+- `page_size + cursor` 稳定分页，同一秒多条消息不会漏读
 
 ## 日报长图默认内容
 
@@ -199,7 +211,8 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 - 标题下统计说明：原始文本字数、压缩后字数、约减少的 tokens 百分比
 - 时间段热度曲线
 - 活跃群友头像 + 名字 + 消息数
-- 关键词 tag p- 省流版（自动过滤技术指标行，避免与顶部统计说明重复）
+- 关键词 tag
+- 省流版（自动过滤技术指标行，避免与顶部统计说明重复）
 
 ## 渲染防裁切机制
 
@@ -232,8 +245,10 @@ cp -r plugin ~/.hanako/plugins/wechat-mcp
 
 1. **用户要数据** → 纯脚本返回结果
 2. **用户要分析** → 先脚本取数据，再 AI 理解
-3. **用户要图片** → pipeline / render 取数据 → AI 输出带 `avatar_name` 的 JSON → summary_img.py 渲染
-4. **用户要发消息** → 生成文件，用户手动粘贴
+3. **用户要总结/分析** → 区间取数 → AI 输出带 `avatar_username` 的 JSON → 默认生成图片
+4. **用户明确只要文字** → 才跳过图片
+5. **本人身份** → 展示名为“我”，真实 self wxid 用于消息统计和头像匹配
+6. **用户要发消息** → 生成文件，用户手动粘贴
 
 零 token 优先。
 

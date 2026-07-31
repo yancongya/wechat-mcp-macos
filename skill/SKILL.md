@@ -1,207 +1,206 @@
 ---
-name: wechat-mcp-setup
-description: "微信本地数据读写。解密 macOS 微信数据库，读取聊天记录、搜索、语音转文字、生成群聊总结。触发词：微信、wechat、群聊、聊天记录、总结、搜索微信、日报图、群聊图片"
+name: wechat-local
+description: "macOS 微信本地数据工作流。支持群聊/私聊、联系人搜索、任意日期区间、04:00 日界线、双方身份与头像、文字总结和日报图。用户提到微信、群聊、私聊、聊天记录、某人与我的对话、搜索微信、总结聊天、日报图，或要求按今天/昨天/指定日期/日期区间回顾时使用。总结意图默认完整生成图片；明确只要文字时才不出图。"
+compatibility: "macOS；需要本项目 backend/.venv、已提取微信数据库密钥，以及可执行本机命令的 Agent。"
 ---
 
-# WeChat MCP
+# WeChat Local
 
-macOS 微信本地数据读取能力。
+通过项目 CLI 读取 macOS 微信本地数据库。核心能力不依赖 Hana 插件；插件作为可选适配层，现已与同一查询核心保持一致。
 
-## 能力
-
-| 能力 | 入口 | 说明 |
-|------|------|------|
-| 读取聊天记录 | `wechat_read` MCP tool | 按群/联系人，支持筛选发送者、时间、分组 |
-| 关键词搜索 | `wechat_search` MCP tool | 跨群搜索，支持按发送者/时间分组 |
-| 群聊列表 | `wechat_groups` MCP tool | 列出所有群聊 |
-| 纯规则总结 | `pipeline.py` | 零 LLM：活跃度/话题/时间线 |
-| 语音转文字 | `voice_to_text.py` | SILK 解码 + faster-whisper |
-| 结构化管理 Prompt | `prompts/render.py` | registry 匹配 → 取数据 → 填充 LLM 模板 |
-| 长图生成 | `summary_img.py` | 总结渲染为精美长图 |
-
-## 安装
+项目根目录默认为：
 
 ```bash
-bash ~/Desktop/OH-WorkSpace/wechat-mcp-macos/skill/scripts/check_env.sh
+~/Desktop/OH-WorkSpace/wechat-mcp-macos
 ```
 
-按输出的缺失步骤执行，所有脚本幂等。
+所有 Python 命令使用项目虚拟环境：
 
-字体依赖（长图生成）：
 ```bash
-pip3 install Pillow --break-system-packages
+backend/.venv/bin/python
 ```
 
-## 使用
+## 意图决策
 
-### 读取消息
-```python
-# MCP 工具
-wechat_read(chat="群名", hours=24, sender="张三", format="grouped")
+| 用户意图 | 行为 |
+|---|---|
+| 读取、看看刚才说了什么 | 查询真实消息，文字返回 |
+| 搜索关键词 | 查询真实消息，文字返回 |
+| 统计消息量 | 运行规则统计，文字或 JSON 返回 |
+| 总结、分析、回顾群聊或私聊 | 取数 → AI 总结 JSON → enrich → validate → 默认生成并交付 PNG |
+| 明确说“只要文字” | 完成总结，但跳过图片 |
 
-# 或 pipeline 直接读
-python3 pipeline.py --dry-run --hours 24 --chat 58299288465
-```
+不得凭自身知识猜测聊天内容。任何总结必须先调用本地数据脚本。
 
-### 搜索
-```python
-wechat_search(keyword="关键词", group_by="sender", hours=24)
-```
+## 日期规则
 
-### 纯规则总结（零 token）
+默认日界线为 **04:00**，与用户的一天口径一致。
+
+- `--today`：本逻辑日 04:00 至现在
+- `--yesterday`：上一个逻辑日 04:00 至本逻辑日 04:00
+- `--date 2026-07-30`：该日 04:00 至次日 04:00
+- `--start 2026-07-25 --end 2026-07-31`：包含 7 月 25 日至 31 日，结束于 8 月 1 日 04:00
+- 精确时间采用左闭右开 `[start, end)`
+- 用户明确要求自然日时传 `--day-start 00:00`
+
+不要自行把“某日到某日”解释成只到结束日期 00:00。
+
+## 读取区间消息
+
 ```bash
-# 预览
 cd ~/Desktop/OH-WorkSpace/wechat-mcp-macos
-backend/.venv/bin/python pipeline.py --dry-run --hours 24 --chat 58299288465
 
-# 保存到文件
-backend/.venv/bin/python pipeline.py --output /tmp/summary.txt --hours 24 --chat 58299288465
+# 今天
+backend/.venv/bin/python scripts/chat_query.py "钟子鹏" --today
 
-# JSON 格式（供链式调用）
-backend/.venv/bin/python pipeline.py --dry-run --hours 24 --json
+# 昨天
+backend/.venv/bin/python scripts/chat_query.py "琅泽群" --yesterday
 
-# 带语音转文字
-backend/.venv/bin/python pipeline.py --dry-run --hours 24 --voice-engine whisper
+# 单日
+backend/.venv/bin/python scripts/chat_query.py "钟子鹏" --date 2026-07-30
+
+# 日期区间，结束日期包含整天
+backend/.venv/bin/python scripts/chat_query.py "琅泽群" \
+  --start 2026-07-25 --end 2026-07-31
+
+# 精确时间
+backend/.venv/bin/python scripts/chat_query.py "钟子鹏" \
+  --start "2026-07-30 18:00" --end "2026-07-31 04:00"
+
+# 快捷范围
+backend/.venv/bin/python scripts/chat_query.py "琅泽群" --last 7d
 ```
 
-### Prompt 渲染（registry 模式）
-按 chat 自动匹配 prompt 模板，精确匹配优先 → 类型回退 → catchall。
+输出包括：
 
-```bash
-# 列出所有已注册 prompt
-backend/.venv/bin/python prompts/render.py --list
+- `range`：起止时间及时间戳
+- `messages`：带发送者身份的真实消息
+- `stats`：消息数、文本数、活动曲线、双方/群成员消息数
+- `truncated`：是否触发消息上限
 
-# 生成给 LLM 的 JSON 长图总结 prompt
-backend/.venv/bin/python prompts/render.py "琅泽群"
+默认最多读取 10000 条。若 `truncated=true`，必须在回答和图片中说明数据被截断；可按需要提高 `--max-messages`。
 
-# JSON 输出（查看匹配到哪个 prompt、基础统计等）
-backend/.venv/bin/python prompts/render.py "琅泽群" --json
-```
+## 身份与头像铁律
 
-### 一键工作流脚本
-```bash
-# 1) 取数 + 生成规则摘要 + 生成给 LLM 的 prompt
-bash scripts/group-summary-workflow.sh prepare "【琅泽-老K】几何节点全能班0群" 0
+每条消息必须保留：
 
-# 2) 把 LLM 返回的 JSON 保存为 summary.json 后，渲染长图
-# render 会自动执行 enrich + validate，再出图
-bash scripts/group-summary-workflow.sh render /path/to/summary.json
-```
-
-### 渲染前自检
-```bash
-# 单独校验增强版 JSON
-backend/.venv/bin/python scripts/validate_summary_json.py /path/to/summary.enriched.json
-```
-
-添加新 trigger：编辑 `prompts/registry.json`，新增 prompts 列表条目即可，无需改代码。
-
-### 长图工作流（AI 总结 → 长图）
-```bash
-# 1. 取原始消息
-backend/.venv/bin/python pipeline.py --dry-run --hours 24 --chat "58299288465@chatroom" --json
-
-# 2. AI 总结为结构化 JSON（格式见下方）
-# 3. 渲染为长图
-backend/.venv/bin/python summary_img.py --input /tmp/summary.json --output /tmp/summary.png
-```
-
-AI 总结输出的 JSON schema：
 ```json
 {
-  "header": {
-    "title": "群名称",
-    "date": "2026-05-30",
-    "stats": "N 人参与 · N 条消息",
-    "hot_word": "热词"
-  },
-  "summary": [
-    "省流版第一句话",
-    "省流版第二句话"
-  ],
-  "topics": [
-    {
-      "title": "话题标题",
-      "time": "10:00 - 11:00",
-      "summary": "一句话摘要",
-      "detail": "详细分析段落",
-      "quotes": [
-        {
-          "name": "群友A",
-          "avatar_name": "真实昵称",
-          "content": "引用内容"
-        }
-      ]
-    }
-  ]
+  "sender": "我",
+  "sender_type": "self",
+  "sender_username": "wxid_xxx"
 }
 ```
 
-头像显示默认规则：
-- 默认开启头像渲染，不要传 `--no-avatars`
-- `quotes` 推荐使用对象格式，并显式提供 `avatar_name` 或 `avatar_username`
-- `name` 可以写成“群友A”等展示名，头像仍会按 `avatar_name` / `avatar_username` 匹配
-- 旧格式 `[["发言人", "引用内容"]]` 仍兼容，但只有名字能直接映射到微信联系人时才会显示真实头像
+或者：
 
-### 群 wxid 速查
-```
-58299288465@chatroom  — 【琅泽-老K】几何节点全能班0群
-48672694909@chatroom  — 【琅泽-老K】BL几何节点入门
-19215266204@chatroom  — 朔朔的程序化反馈群
+```json
+{
+  "sender": "联系人昵称",
+  "sender_type": "contact",
+  "sender_username": "wxid_xxx"
+}
 ```
 
-### 清理缓存
+- 页面展示使用 `sender`。
+- 头像匹配使用真实 `sender_username`。
+- 引用 JSON 中同时填写 `avatar_name` 和 `avatar_username`。
+- 用户本人展示名写“我”，`avatar_username` 必须使用 self wxid。
+- 群聊和私聊都不得省略用户本人的消息、消息数和头像。
+- 数据不能可靠识别发送者时，说明限制，不猜测归属。
+
+## 总结图片标准流程
+
+### 1. 准备数据和 Prompt
+
 ```bash
-backend/.venv/bin/python cleanup.py --check  # 查看大小
-backend/.venv/bin/python cleanup.py          # 清理
+bash scripts/chat-summary-workflow.sh prepare \
+  --chat "钟子鹏" \
+  --start 2026-07-25 \
+  --end 2026-07-31
 ```
 
-## 工作流（强制）
+脚本输出目录包含：
 
-无论用户措辞如何（总结、分析、看看、读一下、讲一下、群里说了啥、最近在聊什么等），必须按以下顺序执行：
-
-1. **调用数据工具** → 先通过 render.py / wechat_read / pipeline.py 获取原始数据
-2. **分析数据** → 基于返回的真实数据做分析
-3. **输出结果** → 基于数据分析给出回答
-4. **需要图片时输出 JSON** → 默认让 LLM 生成可直接喂给 `summary_img.py` 的 JSON
-5. **默认保留头像键** → `quotes` 优先使用对象格式，并写入 `avatar_name` 或 `avatar_username`
-6. **不得跳过步骤 1** → 不允许直接用自身知识替代表述或猜测内容
-
-## 决策规范
-
-1. **用户要数据** → 纯脚本返回结果
-2. **用户要分析** → 先脚本取数据，再 AI 理解
-3. **用户要图片** → pipeline 取数据 → AI 总结为 JSON → summary_img.py 渲染
-4. **用户要发消息** → 生成文件，用户手动粘贴
-
-零 token 优先。
-
-## 注意事项
-
-- **字体**：macOS 上 PIL 需用 STHeiti Medium.ttc（`/System/Library/Fonts/STHeiti Medium.ttc`）
-- **群成员名称**：大部分显示为 wxid，唯有 contacts.json 映射过的联系人会显示昵称
-- **图片消息**：数据库中图片为二进制 blob，当前无法直接解密显示
-
-## 项目路径
-
-```
-~/Desktop/OH-WorkSpace/wechat-mcp-macos/
-├── backend/.venv/          # Python 运行时（wechat_mcp_macos 包）
-├── plugin/                 # Hana 插件（manifest + tools）
-├── skill/                  # Agent skill 源码
-├── prompts/
-│   ├── registry.json       # 所有 trigger 定义
-│   ├── render.py           # 匹配 + 填充引擎
-│   ├── templates/          # LLM prompt 模板
-│   └── summaries/          # 生成的长图
-├── pipeline.py             # 纯规则总结
-├── summary_img.py          # 长图渲染
-├── voice_to_text.py        # 语音转文字
-├── crypto/                 # 解密模块
-├── key.txt / wechat_keys.json / contacts.json
-└── .gitignore
+```text
+context.json
+pipeline.json
+prompt.txt
 ```
 
-## 密钥过期
+### 2. 生成结构化总结
 
-微信更新后重跑 `sign_wechat.sh` + `extract_keys.sh`。
+读取 `context.json` 和 `prompt.txt`，严格基于真实压缩上下文生成 `summary.json`。
+
+- 私聊：提取双方诉求、约定、待办、未决事项、情绪变化。
+- 群聊：提取核心议题、共识、分歧、技巧、资源和待办。
+- 多日范围：合并重复话题，描述话题演变，不逐条堆砌流水账。
+- 对验证码、密码、令牌和疑似敏感数字做脱敏。
+- 引用必须包含准确的 `avatar_username`。
+
+### 3. 校验并出图
+
+```bash
+bash scripts/chat-summary-workflow.sh render /path/to/summary.json
+```
+
+该步骤依次执行：
+
+```text
+enrich_summary_json.py
+→ validate_summary_json.py
+→ summary_img.py
+```
+
+成功后交付 `summary.png`。不要只在文字里给出文件路径。
+
+## Prompt Registry
+
+`prompts/registry.json` 决定专用模板与通用 fallback。
+
+- 专用群可使用定制模板。
+- 未匹配群聊使用 `any-group-summary`。
+- 未匹配私聊使用 `any-contact-summary`。
+- 两种通用总结都配置 `image: true`。
+
+“总结”意图必须走完整图片工作流，不能因为 fallback 命中规则统计而停在文字阶段。
+
+## Hana 插件工具
+
+插件 0.3.0 自动发现 `tools/*.js`，提供四个只读工具：
+
+```text
+wechat-mcp_wechat_read
+wechat-mcp_wechat_search
+wechat-mcp_wechat_groups
+wechat-mcp_wechat_status
+```
+
+`wechat_read` 和 `wechat_search` 与 Skill 共用 `scripts/plugin_bridge.py`、`chat_query.py` 和 `date_range.py`，日期、身份和分页语义一致。读取分页使用 `(create_time, local_id)` 复合游标，搜索分页额外加入会话 wxid；传回 `next_cursor` 即可继续。
+
+插件工具只是快捷入口。总结图片仍按本 Skill 的 prepare → AI JSON → render 流程执行。
+
+## 环境检查
+
+```bash
+bash skill/scripts/check_env.sh
+```
+
+密钥失效时按顺序执行：
+
+```bash
+bash skill/scripts/sign_wechat.sh
+bash skill/scripts/extract_keys.sh
+```
+
+头像依赖 `head_image/head_image.db`。若头像无法显示，先检查密钥和头像库记录，不要伪造头像。
+
+## 兼容入口
+
+旧命令仍可用：
+
+```bash
+bash scripts/group-summary-workflow.sh prepare "群名或 wxid" 24
+```
+
+它会转发到新的 `chat-summary-workflow.sh`。新工作流优先使用参数式调用。

@@ -24,6 +24,11 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 REGISTRY_FILE = PROJECT_DIR / "prompts" / "registry.json"
 TEMPLATES_DIR = PROJECT_DIR / "prompts" / "templates"
 VENV_PYTHON = PROJECT_DIR / "backend" / ".venv" / "bin" / "python"
+SCRIPTS_DIR = PROJECT_DIR / "scripts"
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from chat_query import query_messages
+from date_range import resolve_date_range
 
 
 # ── registry 加载 ──
@@ -89,16 +94,17 @@ def resolve_chat_info(db, name: str):
     return None, None, None
 
 
-def get_messages(db, wxid: str, hours: int, limit: int = 200):
-    """Fetch recent messages from a chat."""
-    if hours is None:
-        hours = 24
-    if hours <= 0:
-        now = datetime.now()
-        since_ts = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    else:
-        since_ts = time.time() - hours * 3600
-    return db.get_messages(wxid, since_ts=since_ts, limit=limit)
+def get_messages(db, wxid: str, display_name: str, date_range, limit: int = 10000):
+    """Fetch messages in a strict [start, end) range with sender identities."""
+    messages, truncated = query_messages(
+        db,
+        wxid,
+        display_name,
+        int(date_range.start.timestamp()),
+        int(date_range.end.timestamp()),
+        limit,
+    )
+    return messages, truncated
 
 
 # ── trigger 匹配 ──
@@ -357,11 +363,13 @@ def _representative_quotes(segment: list, limit: int = 3) -> list:
     return quotes
 
 
-def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0) -> dict:
+def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0, is_group: bool = True) -> dict:
     clean = _clean_text_messages(msgs)
     type_counts = {}
     hour_counts = {f"{h:02d}": 0 for h in range(24)}
     sender_counts = {}
+    sender_usernames = {}
+    sender_types = {}
     for m in msgs:
         t = str(m.get("type", ""))
         type_counts[t] = type_counts.get(t, 0) + 1
@@ -371,6 +379,8 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
         sender = (m.get("sender") or "").strip()
         if sender:
             sender_counts[sender] = sender_counts.get(sender, 0) + 1
+            sender_usernames.setdefault(sender, m.get("sender_username") or "")
+            sender_types.setdefault(sender, m.get("sender_type") or "")
 
     segments = []
     for seg in _segment_messages(clean):
@@ -385,10 +395,15 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
         relevance = _domain_relevance_score(segment_text + " " + title + " " + " ".join(keywords))
         chatter = sum(1 for m in seg if any(k in (m.get("text") or "") for k in ["哈哈", "笑死", "牛逼", "卧槽", "爽", "表情", "旺柴", "捂脸"]))
         score = len(seg) + len(participants) * 2 + resources * 3 + relevance * 10 - chatter
-        if relevance <= 0 and len(seg) < 35:
+        if is_group and relevance <= 0 and len(seg) < 35:
             continue
-        if chatter > len(seg) * 0.35 and relevance < 2:
+        if is_group and chatter > len(seg) * 0.35 and relevance < 2:
             continue
+        if not is_group:
+            # 私聊的价值常在见面、行程、时间、请求与承诺，不应套用技术群关键词过滤。
+            action_words = ["明天", "今晚", "几点", "有空", "来", "去", "吃", "约", "加班", "下班", "发给", "记得", "需要", "可以", "不如", "一起"]
+            action_score = sum(1 for word in action_words if word in segment_text)
+            score += action_score * 8 + len(seg) * 2
         segments.append({
             "title": title,
             "time": f"{seg[0].get('time_str','')} - {seg[-1].get('time_str','')}",
@@ -413,11 +428,20 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
         if len(tips) >= 8:
             break
 
+    identity_lines = []
+    for name in sorted(sender_counts, key=sender_counts.get, reverse=True):
+        username = sender_usernames.get(name) or ""
+        sender_type = sender_types.get(name) or ""
+        identity_lines.append(f"- {name}: sender_type={sender_type}, avatar_username={username or '未知'}")
+
     context_lines = [
         f"消息总数：{stats['total']}",
         f"最活跃时段：{stats['peak_hour']}",
         f"发言人数：{stats['sender_count']}",
         f"热词：{' / '.join(_extract_hot_words(msgs, top_n=6)) or '无'}",
+        "",
+        "【参与者身份映射】",
+        *(identity_lines or ["- 无"]),
         "",
         "【高信息话题】",
     ]
@@ -440,6 +464,12 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
     chars_saved = max(raw_message_chars - compressed_chars, 0)
     estimated_tokens_saved = round(chars_saved / 1.1) if chars_saved else 0
 
+    ranked_speakers = sorted(sender_counts.items(), key=lambda x: x[1], reverse=True)
+    visible_speakers = ranked_speakers[:8]
+    self_entry = next((item for item in ranked_speakers if sender_types.get(item[0]) == "self"), None)
+    if self_entry and self_entry not in visible_speakers:
+        visible_speakers = visible_speakers[:7] + [self_entry]
+
     return {
         "type_counts": type_counts,
         "hot_words": _extract_hot_words(msgs, top_n=6),
@@ -448,8 +478,14 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
         "resources": resources,
         "activity_by_hour": [{"hour": hour, "count": count} for hour, count in hour_counts.items()],
         "top_speakers": [
-            {"name": name, "avatar_name": name, "count": count}
-            for name, count in sorted(sender_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+            {
+                "name": name,
+                "avatar_name": name,
+                "avatar_username": sender_usernames.get(name) or "",
+                "sender_type": sender_types.get(name) or "",
+                "count": count,
+            }
+            for name, count in visible_speakers
         ],
         "metrics": {
             "message_count": stats["total"],
@@ -509,7 +545,15 @@ def render_image(summary_text: str, output_path: str, style: dict | None = None)
 def main():
     parser = argparse.ArgumentParser(description="Prompt render engine for wechat-mcp-macos")
     parser.add_argument("chat", nargs="?", default="", help="群聊/联系人名称或 wxid")
-    parser.add_argument("--hours", type=int, default=None, help="时间范围（小时），0=今天自然日")
+    parser.add_argument("--hours", type=int, default=None, help="兼容参数：过去 N 小时；0=今天")
+    parser.add_argument("--date", dest="date_value", help="指定单日 YYYY-MM-DD")
+    parser.add_argument("--start", dest="start_value", help="区间开始 YYYY-MM-DD[ HH:MM]")
+    parser.add_argument("--end", dest="end_value", help="区间结束；仅日期时包含整天")
+    parser.add_argument("--today", action="store_true", help="今天，按日界线计算")
+    parser.add_argument("--yesterday", action="store_true", help="昨天，按日界线计算")
+    parser.add_argument("--last", help="快捷范围，如 7d、12h")
+    parser.add_argument("--day-start", default="04:00", help="每日边界，默认 04:00")
+    parser.add_argument("--max-messages", type=int, default=None, help="最大读取消息数，默认 10000")
     parser.add_argument("--type", choices=["group", "contact", "auto"], default="auto",
                         help="强制指定类型（auto 自动检测）")
     parser.add_argument("--image", action="store_true", help="同时生成图片")
@@ -571,37 +615,52 @@ def main():
     process = prompt_entry.get("process", {})
     output_cfg = prompt_entry.get("output", {})
 
-    # ── 取数 ──
+    # ── 解析日期并取数 ──
     pipeline_args = prompt_entry.get("input", {}).get("pipeline_args", {})
-    hours = args.hours if args.hours is not None else pipeline_args.get("hours", defaults.get("hours", 24))
-    limit = pipeline_args.get("limit", defaults.get("limit", 200))
-    messages = get_messages(db, wxid, hours, limit)
+    default_hours = pipeline_args.get("hours", defaults.get("hours", 0))
+    explicit_range = any((args.date_value, args.start_value, args.end_value, args.today, args.yesterday, args.last))
+    range_hours = args.hours if args.hours is not None else (None if explicit_range else default_hours)
+    try:
+        date_range = resolve_date_range(
+            date_value=args.date_value,
+            start_value=args.start_value,
+            end_value=args.end_value,
+            hours=range_hours,
+            today=args.today,
+            yesterday=args.yesterday,
+            last=args.last,
+            day_start=args.day_start,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    limit = args.max_messages or pipeline_args.get("limit", defaults.get("max_messages", 10000))
+    messages, truncated = get_messages(db, wxid, display_name, date_range, limit)
 
     raw_message_text = format_messages_text(messages)
     raw_message_chars = len(raw_message_text)
 
     if not messages:
-        window_text = "今天" if hours == 0 else f"最近 {hours}h"
-        print(f"⚠️ {display_name} {window_text}内没有消息")
+        print(f"⚠️ {display_name} {date_range.label}内没有消息")
         # Still produce minimal output
         stats = {"total": 0, "peak_hour": "无", "sender_count": 0}
         compressed = {"context_text": "无有效消息", "top_segments": [], "tips": [], "resources": [], "hot_words": [], "activity_by_hour": [], "top_speakers": [], "metrics": {"message_count": 0, "sender_count": 0, "text_count": 0, "raw_chars": 0, "compressed_chars": 0, "chars_saved": 0, "estimated_tokens_saved": 0, "compression_ratio": 0}}
     else:
         stats = compute_stats(messages)
-        compressed = build_compressed_context(messages, stats, raw_message_chars=raw_message_chars)
+        compressed = build_compressed_context(messages, stats, raw_message_chars=raw_message_chars, is_group=is_group)
 
     # ── 变量 ──
     today = datetime.now().strftime("%Y-%m-%d")
-    window_desc = "今天自然日" if hours == 0 else f"最近 {hours} 小时"
+    target_date = date_range.start.strftime("%Y-%m-%d") if date_range.mode in ("today", "yesterday", "date") else date_range.label
+    window_desc = f"{date_range.label}（{date_range.start.strftime('%Y-%m-%d %H:%M')} 至 {date_range.end.strftime('%Y-%m-%d %H:%M')}）"
     vars_dict = {
         "GROUP_NAME": display_name,
         "CONTACT_NAME": display_name,
-        "TARGET_DATE": today,
+        "TARGET_DATE": target_date,
         "WXID": wxid,
         "TOTAL": str(stats["total"]),
         "PEAK_HOUR": stats["peak_hour"],
         "SENDER_COUNT": str(stats["sender_count"]),
-        "HOURS": str(hours if hours is not None else 24),
+        "HOURS": str(range_hours if range_hours is not None else 0),
         "WINDOW_DESC": window_desc,
         "MESSAGES": raw_message_text,
         "COMPRESSED_CONTEXT": compressed["context_text"],
@@ -624,7 +683,7 @@ def main():
         # rule mode: output structured summary
         result_text = (
             f"=== {display_name} 消息统计 ===\n"
-            f"日期: {today} (最近 {hours}h)\n"
+            f"日期范围: {window_desc}\n"
             f"消息总数: {stats['total']} 条\n"
             f"发言人数: {stats['sender_count']} 人\n"
             f"最活跃时段: {stats['peak_hour']}\n"
@@ -636,7 +695,10 @@ def main():
             "chat": display_name,
             "wxid": wxid,
             "is_group": is_group,
-            "hours": hours,
+            "hours": range_hours,
+            "range": date_range.to_dict(),
+            "truncated": truncated,
+            "max_messages": limit,
             "stats": stats,
             "mode": mode,
             "prompt_id": prompt_entry.get("id", "default"),

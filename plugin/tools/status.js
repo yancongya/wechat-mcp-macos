@@ -1,75 +1,30 @@
-const { execSync } = require("child_process");
-const path = require("path");
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 
-const PROJECT_DIR = path.join(
-  process.env.HOME,
-  "Desktop/OH-WorkSpace/wechat-mcp-macos"
-);
-const VENV_PYTHON = path.join(PROJECT_DIR, "backend/.venv/bin/python");
-
-function runPython(code) {
-  try {
-    const result = execSync(`${VENV_PYTHON} -c '${code.replace(/'/g, "'\\''")}'`, {
-      cwd: PROJECT_DIR,
-      timeout: 30000,
-      encoding: "utf-8",
-    });
-    return { ok: true, output: result.trim() };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
+const PROJECT_DIR = path.join(process.env.HOME, "Desktop/OH-WorkSpace/wechat-mcp-macos");
+const PYTHON = path.join(PROJECT_DIR, "backend/.venv/bin/python");
+const BRIDGE = path.join(PROJECT_DIR, "scripts/plugin_bridge.py");
 
 export const name = "wechat_status";
-export const description = "检查微信 MCP Server 状态：配置、密钥、微信进程等";
+export const description = "只读检查微信数据库、密钥、进程与签名状态。";
+export const parameters = { type: "object", properties: {} };
+export const sessionPermission = { readOnly: true };
 
 export async function execute() {
-  const code = `
-import sys, os, json
-sys.path.insert(0, '.')
-from wechat_mcp_macos.config import load_config, KEYS_FILE
-from wechat_mcp_macos.key_extractor import is_wechat_running, is_wechat_signed, get_wechat_pid
-
-cfg = load_config()
-lines = []
-
-# DB
-if cfg['db_dir']:
-    lines.append(f"数据库目录: ✅")
-else:
-    lines.append(f"数据库目录: ❌ 未配置")
-
-# Keys
-if os.path.exists(str(KEYS_FILE)):
-    with open(KEYS_FILE) as f:
-        keys = json.load(f)
-    lines.append(f"加密密钥: ✅ {len(keys)} 个数据库")
-else:
-    lines.append(f"加密密钥: ❌ 未提取")
-
-# WeChat
-pid = get_wechat_pid()
-if pid:
-    lines.append(f"微信进程: ✅ 运行中 (PID {pid})")
-else:
-    lines.append(f"微信进程: ❌ 未运行")
-
-# Signing
-if is_wechat_signed():
-    lines.append(f"微信签名: ✅ ad-hoc")
-else:
-    lines.append(f"微信签名: ❌ hardened runtime")
-
-print("\\n".join(lines))
-`;
-
-  const result = runPython(code);
-  if (result.ok) {
+  try {
+    const output = execFileSync(PYTHON, [BRIDGE, "status"], {
+      cwd: PROJECT_DIR,
+      input: "{}",
+      timeout: 60000,
+      encoding: "utf-8",
+    });
+    const result = JSON.parse(output);
+    if (!result.ok) throw new Error(result.error);
     return {
-      content: [{ type: "text", text: `=== 微信 MCP 状态 ===\n${result.output}` }],
+      content: [{ type: "text", text: result.text }],
+      structuredContent: result,
     };
+  } catch (error) {
+    return { content: [{ type: "text", text: `检查失败: ${error.stderr || error.message}` }] };
   }
-  return {
-    content: [{ type: "text", text: `检查失败: ${result.error}` }],
-  };
 }

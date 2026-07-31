@@ -43,13 +43,16 @@ def main():
         if msg_count > 0 or sender_count > 0:
             data.setdefault("header", {})["stats"] = f"约{msg_count}条消息 · {sender_count}人参与 · 文本{text_count}条"
 
+    metrics["is_group"] = bool(context.get("is_group", True))
     data["report_meta"] = metrics
     # 只在有数据时覆盖，避免空 context 清掉 summary.json 已有内容
-    if compressed.get("activity_by_hour"):
+    if "activity_by_hour" in compressed:
         data["activity"] = compressed["activity_by_hour"]
-    if compressed.get("top_speakers"):
+    if "top_speakers" in compressed:
+        # 数据层统计优先于 LLM 输出，保留 avatar_username，尤其是“我”的真实 wxid。
         data["top_speakers"] = compressed["top_speakers"][:6]
-    if compressed.get("hot_words"):
+    if "hot_words" in compressed:
+        # 空数组也是合法结果，表示该区间没有稳定热词。
         data["keyword_tags"] = compressed["hot_words"][:8]
 
     summary_items = data.get("summary", [])
