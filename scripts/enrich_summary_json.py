@@ -44,9 +44,12 @@ def main():
             data.setdefault("header", {})["stats"] = f"约{msg_count}条消息 · {sender_count}人参与 · 文本{text_count}条"
 
     metrics["is_group"] = bool(context.get("is_group", True))
+    metrics["activity_granularity"] = compressed.get("activity_granularity", "hour")
     data["report_meta"] = metrics
-    # 只在有数据时覆盖，避免空 context 清掉 summary.json 已有内容
-    if "activity_by_hour" in compressed:
+    # 新数据使用自适应 activity；兼容旧 context 的 activity_by_hour。
+    if "activity" in compressed:
+        data["activity"] = compressed["activity"]
+    elif "activity_by_hour" in compressed:
         data["activity"] = compressed["activity_by_hour"]
     if "top_speakers" in compressed:
         # 数据层统计优先于 LLM 输出，保留 avatar_username，尤其是“我”的真实 wxid。

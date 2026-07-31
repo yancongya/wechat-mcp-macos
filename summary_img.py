@@ -317,7 +317,7 @@ def calc_summary_height(summary_items, f_summary, content_w, s):
 def calc_dashboard_height(report_meta, activity, top_speakers, keyword_tags, s):
     if not (activity or top_speakers or keyword_tags):
         return 0
-    h = int(78 * s)
+    h = int(86 * s)
     if top_speakers:
         rows = (len(top_speakers) + 2) // 3
         h += rows * int(44 * s)
@@ -337,9 +337,12 @@ def draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers
     f_small = get_font(int(10 * s))
 
     if activity:
-        draw.text((PAD, cy), "📈 时间段热度", fill=C_TITLE, font=f_sec)
+        granularity = report_meta.get("activity_granularity", "hour")
+        section_title = "📈 每日热度" if granularity == "day" else "📈 时间段热度"
+        chart_title = "每日消息量" if granularity == "day" else "时间段热度"
+        draw.text((PAD, cy), section_title, fill=C_TITLE, font=f_sec)
         cy += int(22 * s)
-        chart_h = int(56 * s)
+        chart_h = int(64 * s)
         chart_x = PAD
         chart_y = cy
         chart_w = W - 2 * PAD
@@ -348,19 +351,25 @@ def draw_dashboard(img, draw, cy, W, PAD, s, report_meta, activity, top_speakers
         max_count = max(counts) if counts else 1
         points = []
         inner_pad = int(10 * s)
+        denominator = max(len(activity) - 1, 1)
         for idx, item in enumerate(activity):
-            x = chart_x + inner_pad + idx * ((chart_w - inner_pad * 2) / 23)
+            x = chart_x + inner_pad + idx * ((chart_w - inner_pad * 2) / denominator)
             y = chart_y + chart_h - inner_pad - ((item.get('count', 0) / max_count) * (chart_h - inner_pad * 2) if max_count else 0)
             points.append((x, y))
         if len(points) >= 2:
             draw.line(points, fill=ACCENT[1], width=max(2, s))
-        for px, py in points[::4]:
+        marker_step = 1 if len(points) <= 10 else max(1, len(points) // 6)
+        for px, py in points[::marker_step]:
             draw.ellipse([px - 2 * s, py - 2 * s, px + 2 * s, py + 2 * s], fill=ACCENT[1])
-        draw.text((chart_x + int(10 * s), chart_y + int(6 * s)), "时间段热度", fill=C_TITLE, font=f_meta)
-        for tick in [0, 6, 12, 18, 23]:
-            label = activity[tick].get('hour', f"{tick:02d}")
-            tx = chart_x + inner_pad + tick * ((chart_w - inner_pad * 2) / 23)
-            draw.text((tx - int(6 * s), chart_y + chart_h - int(14 * s)), label, fill=C_META, font=f_small)
+        draw.text((chart_x + int(10 * s), chart_y + int(6 * s)), chart_title, fill=C_TITLE, font=f_meta)
+        tick_count = min(len(activity), 7)
+        tick_indices = sorted({round(i * (len(activity) - 1) / max(tick_count - 1, 1)) for i in range(tick_count)})
+        for tick in tick_indices:
+            item = activity[tick]
+            label = str(item.get('label') or item.get('date') or item.get('hour') or tick)
+            tx = chart_x + inner_pad + tick * ((chart_w - inner_pad * 2) / denominator)
+            label_w = f_small.getbbox(label)[2]
+            draw.text((tx - label_w / 2, chart_y + chart_h - int(14 * s)), label, fill=C_META, font=f_small)
         cy += chart_h + int(14 * s)
 
     if top_speakers:

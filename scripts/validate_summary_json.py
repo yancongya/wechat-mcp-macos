@@ -71,8 +71,17 @@ def main():
         fail("缺少 report_meta，说明未经过 enrich 流程")
 
     activity = data.get("activity")
-    if not isinstance(activity, list) or len(activity) != 24:
-        fail("activity 必须存在且长度为 24，说明时间热度数据异常")
+    if not isinstance(activity, list) or not activity:
+        fail("activity 必须是非空数组，说明热度数据异常")
+    granularity = report_meta.get("activity_granularity", "hour")
+    if granularity not in ("hour", "day"):
+        fail("report_meta.activity_granularity 必须是 hour 或 day")
+    if granularity == "hour" and len(activity) != 24:
+        fail("小时热度 activity 必须包含 24 个点")
+    if granularity == "day" and not all(item.get("date") for item in activity):
+        fail("每日热度 activity 必须为每个点提供 date")
+    if granularity == "day" and len(activity) < 2:
+        warn("每日热度不足 2 天，建议改用小时热度")
 
     non_zero = [x for x in activity if x.get("count", 0) > 0]
     if not non_zero:

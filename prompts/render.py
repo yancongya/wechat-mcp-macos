@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # ── 路径 ──
@@ -363,7 +363,7 @@ def _representative_quotes(segment: list, limit: int = 3) -> list:
     return quotes
 
 
-def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0, is_group: bool = True) -> dict:
+def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0, is_group: bool = True, date_range=None) -> dict:
     clean = _clean_text_messages(msgs)
     type_counts = {}
     hour_counts = {f"{h:02d}": 0 for h in range(24)}
@@ -464,6 +464,32 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
     chars_saved = max(raw_message_chars - compressed_chars, 0)
     estimated_tokens_saved = round(chars_saved / 1.1) if chars_saved else 0
 
+    # 单日按小时展示，多日按逻辑日展示，避免周报把 7 天叠加成 24 小时曲线。
+    activity_granularity = "hour"
+    activity = [{"label": hour, "hour": hour, "count": count} for hour, count in hour_counts.items()]
+    if date_range and (date_range.end - date_range.start) > timedelta(hours=48):
+        activity_granularity = "day"
+        boundary_hour, boundary_minute = map(int, date_range.day_start.split(":"))
+        boundary_delta = timedelta(hours=boundary_hour, minutes=boundary_minute)
+        first_day = (date_range.start - boundary_delta).date()
+        last_day = (date_range.end - timedelta(seconds=1) - boundary_delta).date()
+        day_counts = {}
+        day = first_day
+        while day <= last_day:
+            day_counts[day.isoformat()] = 0
+            day += timedelta(days=1)
+        for message in msgs:
+            timestamp = message.get("timestamp")
+            if timestamp is None:
+                continue
+            logical_day = (datetime.fromtimestamp(timestamp) - boundary_delta).date().isoformat()
+            if logical_day in day_counts:
+                day_counts[logical_day] += 1
+        activity = [
+            {"label": day[5:], "date": day, "count": count}
+            for day, count in day_counts.items()
+        ]
+
     ranked_speakers = sorted(sender_counts.items(), key=lambda x: x[1], reverse=True)
     visible_speakers = ranked_speakers[:8]
     self_entry = next((item for item in ranked_speakers if sender_types.get(item[0]) == "self"), None)
@@ -476,6 +502,8 @@ def build_compressed_context(msgs: list, stats: dict, raw_message_chars: int = 0
         "top_segments": top_segments,
         "tips": tips[:6],
         "resources": resources,
+        "activity": activity,
+        "activity_granularity": activity_granularity,
         "activity_by_hour": [{"hour": hour, "count": count} for hour, count in hour_counts.items()],
         "top_speakers": [
             {
@@ -643,10 +671,16 @@ def main():
         print(f"⚠️ {display_name} {date_range.label}内没有消息")
         # Still produce minimal output
         stats = {"total": 0, "peak_hour": "无", "sender_count": 0}
-        compressed = {"context_text": "无有效消息", "top_segments": [], "tips": [], "resources": [], "hot_words": [], "activity_by_hour": [], "top_speakers": [], "metrics": {"message_count": 0, "sender_count": 0, "text_count": 0, "raw_chars": 0, "compressed_chars": 0, "chars_saved": 0, "estimated_tokens_saved": 0, "compression_ratio": 0}}
+        compressed = {"context_text": "无有效消息", "top_segments": [], "tips": [], "resources": [], "hot_words": [], "activity": [], "activity_granularity": "hour", "activity_by_hour": [], "top_speakers": [], "metrics": {"message_count": 0, "sender_count": 0, "text_count": 0, "raw_chars": 0, "compressed_chars": 0, "chars_saved": 0, "estimated_tokens_saved": 0, "compression_ratio": 0}}
     else:
         stats = compute_stats(messages)
-        compressed = build_compressed_context(messages, stats, raw_message_chars=raw_message_chars, is_group=is_group)
+        compressed = build_compressed_context(
+            messages,
+            stats,
+            raw_message_chars=raw_message_chars,
+            is_group=is_group,
+            date_range=date_range,
+        )
 
     # ── 变量 ──
     today = datetime.now().strftime("%Y-%m-%d")
