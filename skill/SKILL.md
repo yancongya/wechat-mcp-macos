@@ -132,6 +132,21 @@ prompt.txt
 
 读取 `context.json` 和 `prompt.txt`，严格基于真实压缩上下文生成 `summary.json`。
 
+#### 字段规范
+
+```text
+summary.json 必须包含：
+- header: { title, date, stats, hot_word }
+- summary: ["一句话摘要", ...]
+- topics: [{ title, time, summary, detail, quotes: [{ name, content }] }]
+- activity: [{ label, count }]  // 24个点（00:00-23:00）
+- top_speakers: [{ name, count }]  // 注意：消息数字段名是 count，不是 messages
+- keyword_tags: ["热词1", ...]
+- report_meta: { is_group, activity_granularity }
+```
+
+#### 内容要求
+
 - 私聊：提取双方诉求、约定、待办、未决事项、情绪变化。
 - 群聊：提取核心议题、共识、分歧、技巧、资源和待办。
 - 多日范围：合并重复话题，描述话题演变，不逐条堆砌流水账。
