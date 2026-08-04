@@ -111,50 +111,95 @@ backend/.venv/bin/python scripts/chat_query.py "琅泽群" --last 7d
 
 ## 总结图片标准流程
 
-### 1. 准备数据和 Prompt
+⚠️ **铁律：必须执行完整流水线，禁止跳过任何步骤，禁止手写 summary.json。**
+
+### 前置条件
+
+执行前必须满足：
+1. 存在 `backend/.venv` 虚拟环境
+2. 微信数据库密钥已提取
+3. 当前目录是项目根目录
+
+### 步骤 1：运行 prepare（必须）
 
 ```bash
+cd ~/Desktop/OH-WorkSpace/wechat-mcp-macos
 bash scripts/chat-summary-workflow.sh prepare \
   --chat "钟子鹏" \
   --start 2026-07-25 \
   --end 2026-07-31
 ```
 
-脚本输出目录包含：
+**此步骤不可跳过**，它会生成：
+- `context.json`：压缩后的聊天上下文（含原始文本字数统计）
+- `pipeline.json`：流水线元数据
+- `prompt.txt`：AI 生成用的 prompt
 
-```text
-context.json
-pipeline.json
-prompt.txt
+验证：检查输出目录是否包含这三个文件。
+
+### 步骤 2：AI 生成 summary.json（必须）
+
+读取 `context.json` 和 `prompt.txt`，**严格基于真实压缩上下文**生成 `summary.json`。
+
+⚠️ **禁止手写 JSON**，必须由 AI 分析 context.json 后生成。
+
+#### 必填字段
+
+```json
+{
+  "header": {
+    "title": "群名/私聊名 报告类型",
+    "date": "YYYY-MM-DD",
+    "stats": "约N条消息 · M人参与",
+    "hot_word": "关键词1 / 关键词2"
+  },
+  "summary": ["一句话摘要"],
+  "topics": [
+    {
+      "title": "话题标题",
+      "time": "HH:00-HH:00",
+      "summary": "话题摘要",
+      "detail": "详细说明",
+      "quotes": [
+        {"name": "发言者", "avatar_name": "显示名", "avatar_username": "wxid", "content": "引用内容"}
+      ]
+    }
+  ],
+  "activity": [
+    {"label": "00:00", "count": 0},
+    ...  // 必须 24 个点（00:00-23:00）
+  ],
+  "top_speakers": [
+    {"name": "显示名", "avatar_name": "显示名", "avatar_username": "wxid", "count": 68}
+  ],
+  "keyword_tags": ["热词1", "热词2"],
+  "report_meta": {
+    "is_group": true,
+    "activity_granularity": "hour",
+    "raw_chars": 18500,
+    "compressed_chars": 3200,
+    "chars_saved": 15300,
+    "estimated_tokens_saved": 5100,
+    "compression_ratio": 82.7
+  }
+}
 ```
 
-### 2. 生成结构化总结
-
-读取 `context.json` 和 `prompt.txt`，严格基于真实压缩上下文生成 `summary.json`。
-
-#### 字段规范
-
-```text
-summary.json 必须包含：
-- header: { title, date, stats, hot_word }
-- summary: ["一句话摘要", ...]
-- topics: [{ title, time, summary, detail, quotes: [{ name, content }] }]
-- activity: [{ label, count }]  // 24个点（00:00-23:00）
-- top_speakers: [{ name, count }]  // 注意：消息数字段名是 count，不是 messages
-- keyword_tags: ["热词1", ...]
-- report_meta: { is_group, activity_granularity }
-```
+**字段规范：**
+- `top_speakers[].count`：消息数字段名是 `count`，**不是** `messages`
+- `activity`：必须是数组，24 个点，标签格式 `"HH:00"`
+- `report_meta`：必须包含 `raw_chars`、`compressed_chars` 等统计数据，否则图片显示 0
 
 #### 内容要求
 
 - 私聊：提取双方诉求、约定、待办、未决事项、情绪变化。
 - 群聊：提取核心议题、共识、分歧、技巧、资源和待办。
 - 多日范围：合并重复话题，描述话题演变，不逐条堆砌流水账。
-- 热度粒度必须匹配报告周期：单日或不超过 48 小时按小时展示，多日/周报按逻辑日展示每天消息量；不得把多天数据叠加成 24 小时曲线冒充周热度。
+- 热度粒度：单日或不超过 48 小时按小时展示，多日/周报按逻辑日展示每天消息量。
 - 对验证码、密码、令牌和疑似敏感数字做脱敏。
 - 引用必须包含准确的 `avatar_username`。
 
-### 3. 校验并出图
+### 步骤 3：运行 render（必须）
 
 ```bash
 bash scripts/chat-summary-workflow.sh render /path/to/summary.json
@@ -163,12 +208,23 @@ bash scripts/chat-summary-workflow.sh render /path/to/summary.json
 该步骤依次执行：
 
 ```text
-enrich_summary_json.py
-→ validate_summary_json.py
-→ summary_img.py
+enrich_summary_json.py  // 补充统计指标
+→ validate_summary_json.py  // 校验格式
+→ summary_img.py  // 渲染图片
 ```
 
+验证：检查输出是否包含 `summary.png`，且图片中原始文本字数不为 0。
+
 成功后交付 `summary.png`。不要只在文字里给出文件路径。
+
+### 常见错误
+
+| 错误 | 原因 | 修复 |
+|------|------|------|
+| 活跃群友消息数显示 0 | `count` 写成了 `messages` | 改为 `count` |
+| 原始文本 0 字 | `report_meta` 缺少 `raw_chars` | 从 context.json 补充 |
+| 省流版显示压缩指标 | 指标行放在了 summary 数组里 | 移到 report_meta |
+| validate 报错 activity 非数组 | activity 写成了对象 `{hourly:[...]}` | 改为直接数组 |
 
 ## 中间数据清理
 
