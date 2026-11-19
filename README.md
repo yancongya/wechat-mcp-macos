@@ -18,10 +18,16 @@ scripts/chat-summary-workflow.sh  ← prepare / render 一键流水线
     ├── enrich_summary_json.py    ← 注入统计、热度、活跃群友、关键词 tag
     └── validate_summary_json.py  ← 渲染前自检
     ↓
+backend/_pkg/wechat_mcp_macos/    ← FastMCP stdio 服务源码（部署副本在 backend/.venv/site-packages/）
+    ├── server.py                 ← 8 个 MCP 工具（读消息 / 搜索 / 发送 / 状态）
+    ├── db.py                     ← 解密库查询；按 create_time 选 message 分片，不按行数
+    ├── liveness.py               ← 孤儿守卫（见「远程 MCP 接入与进程生命周期」）
+    └── key_extractor.py          ← 数据库密钥提取
 backend/.venv/                    ← Python 运行时（wechat_mcp_macos 包）
     ├── pipeline.py               ← 纯规则总结 + 联系人解析
     ├── summary_img.py            ← 长图渲染
     └── voice_to_text.py          ← 语音转文字
+scripts/wechat-mcp-remote         ← 远程 MCP 桥接（强制 LAN sshd，见 docs/）
 cleanup.py                       ← 中间数据清理（时间+容量双阈值）
 cleanup-policy.json              ← 清理策略配置
 
@@ -161,7 +167,8 @@ print(f'contacts.json updated: {len(contacts)} entries')
 ```
 wechat-mcp-macos/
 ├── backend/
-│   └── .venv/              # Python 运行时（wechat_mcp_macos 包）
+│   ├── _pkg/wechat_mcp_macos/    # FastMCP 服务源码（server / db / liveness / …）
+│   └── .venv/              # Python 运行时（wechat_mcp_macos 包，实际部署位置）
 ├── plugin/                 # Hana 插件（manifest.json + 4 tools）
 ├── skill/                  # Hana Agent skill（含完整流程规范）
 ├── prompts/                # Prompt 管理系统
@@ -173,7 +180,8 @@ wechat-mcp-macos/
 │   ├── chat-summary-workflow.sh  # 总结流水线（prepare/render）
 │   ├── chat_query.py       # 日期区间查询
 │   ├── enrich_summary_json.py    # 注入统计、热度、活跃群友
-│   └── validate_summary_json.py  # JSON 格式校验
+│   ├── validate_summary_json.py  # JSON 格式校验
+│   └── wechat-mcp-remote   # 远程 MCP 桥接（LAN IP 缓存 + 裸 TCP 探测）
 ├── pipeline.py             # 纯规则总结 + 联系人解析
 ├── summary_img.py          # 长图渲染
 ├── voice_to_text.py        # 语音转文字
@@ -182,6 +190,7 @@ wechat-mcp-macos/
 ├── contacts.json           # 通讯录映射（从 contact.db 解密）
 ├── group_nicknames.json    # 群成员补充昵称（fallback）
 ├── crypto/                 # 解密模块
+├── docs/                   # 远程接入 / 进程生命周期说明
 ├── tests/                  # 单元测试
 └── .gitignore
 ```
@@ -278,6 +287,46 @@ backend/.venv/bin/python cleanup.py
 6. **用户要发消息** → 生成文件，用户手动粘贴
 
 零 token 优先。
+
+## 远程 MCP 接入与进程生命周期
+
+两个已经踩过的坑，完整说明见 [`docs/remote-access-and-lifecycle.md`](docs/remote-access-and-lifecycle.md)。
+
+**① 远程调用只能走 LAN sshd。** macOS 的 TCC 只给 sshd 会话 Full Disk Access；Tailscale SSH 是 `tailscaled` 自己 `setuid` exec 出来的，读微信容器直接 `Operation not permitted`——**能连上 ≠ 能读数据**。桥接脚本 `scripts/wechat-mcp-remote` 负责：缓存 LAN IP → 裸 TCP 探测复验 → 只有缓存失效才做一次 shell hop 重新解析。正式 exec 时**绝不给 ssh 加 `-n`**，否则 stdin 变 `/dev/null`，服务起来也没有客户端。
+
+```yaml
+# Hermes ~/.hermes/config.yaml
+  wechat-mengyu:
+    command: /path/to/.local/bin/wechat-mcp-remote
+    args: [mengyus-mac-mini-cli, mengyulu,
+           /Users/mengyulu/wechat-mcp-macos/backend/.venv/bin/wechat-mcp-macos,
+           192.168.3.38]        # LAN hint，避免每次靠 DHCP 猜
+    timeout: 180
+```
+
+**② 一个客户端连接一个进程，进程必须自己会退。** stdio MCP 没有共享守护进程，也不能复用实例；客户端断开后不退出就会堆孤儿（2026-11-19 实测 7 个残留，最久跑了 2.5 天，每个还挂着一个已死的 Tailscale 会话）。`liveness.py` 三个守卫：启动时 stdin 就是 `/dev/null`、父进程消失（含启动即 `ppid == 1`）、空闲超时（默认 6h）。
+
+> 守卫 1 必须在 `mcp.run()` **之前**采样：FastMCP 4 启动后会把 `/dev/null` 挂到 fd 0，事后再检测会把所有正常会话误杀。
+
+```bash
+# 找孤儿：命令行一样、只有 etime 不同、fd0 -> /dev/null、RSS ~4MB
+pgrep -fl "python -m wechat_mcp_macos"
+pkill -TERM -f "python -m wechat_mcp_macos"     # 只杀得掉本 uid 的
+
+# 自检守卫：应在 ~1s 内退出，rc=0
+WECHAT_MCP_GUARD_GRACE=1 backend/.venv/bin/wechat-mcp-macos < /dev/null; echo "rc=$?"
+
+# 调试时关闭守卫
+WECHAT_MCP_GUARDS=0 backend/.venv/bin/wechat-mcp-macos
+```
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `WECHAT_MCP_GUARDS` | `1` | `0` 关闭全部守卫 |
+| `WECHAT_MCP_PARENT_GUARD` | `1` | `0` 只关父进程守卫（改成 LaunchAgent 常驻时用） |
+| `WECHAT_MCP_GUARD_GRACE` | `8` | 启动后多少秒开始生效 |
+| `WECHAT_MCP_GUARD_INTERVAL` | `15` | 巡检间隔（秒） |
+| `WECHAT_MCP_IDLE_TIMEOUT` | `21600` | 空闲多少秒退出，`0` = 永不 |
 
 ## 依赖
 

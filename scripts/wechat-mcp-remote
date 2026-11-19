@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# WeChat MCP stdio bridge (NAS -> Mac).
+#
+# Why this exists: macOS sshd holds Full Disk Access, Tailscale SSH does not, so
+# the remote MCP binary has to be started over the LAN sshd or every DB read
+# fails with "Operation not permitted". Resolving the Mac's LAN address used to
+# cost a Tailscale shell hop on every start (DHCP moves it, so nothing could be
+# pinned), and each hop left an orphaned tailscaled session behind. The resolved
+# address is now cached and re-validated with a bare TCP probe - no ssh, no
+# auth, no session - so the common path opens no Tailscale session at all.
+#
+# usage: wechat-mcp-remote <ssh-shell-host> <remote-user> <remote-binary> [lan-ip-hint ...]
+#   lan-ip-hint      known LAN address(es) to try before falling back to the hop
+# env:
+#   WECHAT_LAN_IP    pin the LAN address (wins over cache and hints)
+#   WECHAT_MCP_CONNECT_TIMEOUT   ssh connect timeout in seconds, default 8
+set -uo pipefail
+
+SHELL_HOST="${1:?shell host required}"
+WUSER="${2:?remote user required}"
+BIN="${3:?remote binary required}"
+shift 3
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/wechat-mcp-remote"
+CACHE_FILE="$CACHE_DIR/${WUSER}@${SHELL_HOST}"
+CONNECT_TIMEOUT="${WECHAT_MCP_CONNECT_TIMEOUT:-8}"
+
+tcp_ok() {  # bare TCP probe of <ip>:22 -- no handshake, no session, no tty
+  [ -n "${1:-}" ] || return 1
+  timeout 3 bash -c "exec 3<>/dev/tcp/$1/22" 2>/dev/null
+}
+
+exec_lan() {
+  mkdir -p "$CACHE_DIR" 2>/dev/null || true
+  printf '%s\n' "$1" > "$CACHE_FILE" 2>/dev/null || true
+  # no -n here: stdin belongs to the MCP client
+  exec ssh -o BatchMode=yes -o ConnectTimeout="$CONNECT_TIMEOUT" \
+    -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new \
+    "$WUSER@$1" "$BIN"
+}
+
+candidates=()
+[ -n "${WECHAT_LAN_IP:-}" ] && candidates+=("$WECHAT_LAN_IP")
+if [ -s "$CACHE_FILE" ]; then
+  candidates+=("$(head -1 "$CACHE_FILE" | tr -d '[:space:]')")
+fi
+for ip in "$@"; do
+  candidates+=("$ip")
+done
+
+if [ ${#candidates[@]} -gt 0 ]; then
+  for ip in "${candidates[@]}"; do
+    if tcp_ok "$ip"; then
+      exec_lan "$ip"
+    fi
+  done
+fi
+
+# Last resort: ask the Mac for its current LAN address over the shell hop.
+LAN=""
+for iface in en0 en1 en2 en3 en4 en5; do
+  LAN="$(ssh -n -o BatchMode=yes -o ConnectTimeout=6 "$SHELL_HOST" \
+          "/usr/sbin/ipconfig getifaddr $iface" </dev/null 2>/dev/null | tr -d '\r' | head -1)"
+  [ -n "$LAN" ] && break
+done
+if [ -z "$LAN" ]; then
+  echo "wechat-mcp-remote: no reachable LAN address for $SHELL_HOST (tried: ${candidates[*]:-nothing})" >&2
+  exit 1
+fi
+exec_lan "$LAN"
